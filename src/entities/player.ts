@@ -138,6 +138,7 @@ export class Player {
       game.items.splice(bi, 1);
       best.targeted = true;
       const picked = best;
+      const pickedTier = TIER_OF[picked.type] || 1;
       game.flying.push(
         new FlyingItem(
           picked.type,
@@ -147,7 +148,7 @@ export class Player {
           () => {
             if (this.carry.length < this.capacity) {
               this.carry.push(picked.type);
-              game.audio.pickup();
+              game.audio.pickup(pickedTier);
               game.stats(ITEM[picked.type].kind === 'raw' ? 'collected' : 'productsPicked', 1);
               game.particles.burst(this.x, this.y - 22, ITEM[picked.type].color, 5, 75, 10);
             }

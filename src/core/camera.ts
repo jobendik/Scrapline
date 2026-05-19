@@ -19,14 +19,20 @@ export class Camera {
     this.shake = Math.max(0, this.shake - dt * 18);
   }
 
-  apply(): void {
+  /**
+   * Set the canvas transform to world-space. `punch` is a small extra zoom
+   * factor used by milestone events (zone unlock, prestige) to give the
+   * world a brief breathing motion.
+   */
+  apply(punch = 0): void {
+    const scale = view.DPR * (1 + punch);
     ctx.setTransform(
-      view.DPR,
+      scale,
       0,
       0,
-      view.DPR,
-      view.W / 2 - this.x + rand(-this.shake, this.shake),
-      view.H / 2 - this.y + rand(-this.shake, this.shake),
+      scale,
+      view.W / 2 - this.x * (1 + punch) + rand(-this.shake, this.shake),
+      view.H / 2 - this.y * (1 + punch) + rand(-this.shake, this.shake),
     );
   }
 

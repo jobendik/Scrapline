@@ -93,6 +93,10 @@ export class Game {
   // Pass 3 — set when init detects a fresh-day chest waiting; the Start
   // Factory button shows it after the intro dismisses.
   pendingDailyShow = false;
+  // Pass 5 — visible cash counter, lerped toward state.cash for smooth roll-ups.
+  displayedCash = 0;
+  // Pass 5 — camera punch-zoom value; ticked down each frame after a milestone.
+  punchZoom = 0;
 
   // ---------------- persistent state ----------------
   state!: SaveState;
@@ -185,6 +189,9 @@ export class Game {
     // Pass 4 — paint the saved theme onto :root before any other rendering
     // so the load screen + first frame match the player's preference.
     applyTheme(this.state.activeTheme || 'cyan');
+    // Pass 5 — seed the displayed cash counter to avoid a roll-up from $0 on
+    // every load.
+    this.displayedCash = this.state.cash;
     this.ad = new AdBridge(this);
     this.player = new Player();
     this.player.bind(this);
@@ -432,7 +439,8 @@ export class Game {
       const next = !this.state.settings.music;
       this.state.settings.music = next;
       setToggle(ui.settingMusic, next);
-      // Music itself is wired in a later pass — flag persisted for now.
+      // Pass 5 — music loop driven by AudioSys.tickMusic.
+      this.audio.setMusicEnabled(next && this.state.settings.sound);
       this.save();
     };
     ui.settingHaptics.onclick = () => {
@@ -481,6 +489,7 @@ export class Game {
   /** Apply persisted settings to the runtime subsystems. */
   applySettings(): void {
     Haptics.enabled = this.state.settings.haptics && Haptics.supported;
+    this.audio.setMusicEnabled(this.state.settings.music && this.state.settings.sound);
     // Graphics quality is currently advisory — entity culling already adapts
     // to view size. The select is wired so future passes (parallax intensity,
     // particle caps, glow shadows) can read from this single source.
@@ -1063,6 +1072,13 @@ export class Game {
     this.levelCheck();
     this.camera.update(this.player, dt);
     this.audio.tick(this.isFrenzy(), dt);
+    this.audio.tickMusic(this.isFrenzy(), dt, this.state.settings.music);
+    // Pass 5 — smooth visible cash counter + camera punch decay.
+    const target = this.state.cash;
+    const diff = target - this.displayedCash;
+    if (Math.abs(diff) < 0.5) this.displayedCash = target;
+    else this.displayedCash += diff * Math.min(1, dt * 4.5);
+    this.punchZoom = Math.max(0, this.punchZoom - dt * 1.6);
     if (this.statusTimer > 0) {
       this.statusTimer -= dt;
       if (this.statusTimer <= 0) this.defaultStatus();
@@ -1087,8 +1103,11 @@ export class Game {
       this.state.cash += this.state.level * 180;
       this.text(this.player.x, this.player.y - 90, 'LEVEL ' + this.state.level, '#ffd45c', 24);
       this.particles.burst(this.player.x, this.player.y, '#ffd45c', 42, 320, 24);
+      // Confetti — a second burst in alt color for extra juice.
+      this.particles.burst(this.player.x, this.player.y, '#ff43df', 28, 360, 22);
       this.camera.shake = 16;
-      this.audio.buy();
+      this.punchZoom = 0.1;
+      this.audio.levelUp();
       Haptics.levelUp();
     }
   }
@@ -1144,9 +1163,11 @@ export class Game {
     this.toast(z.name + ' unlocked.');
     this.status('New zone online: ' + z.name + '.', 4);
     this.camera.shake = 22;
-    this.audio.surge();
+    this.punchZoom = 0.18;
+    this.audio.zoneUnlock();
     Haptics.zoneUnlock();
     if (n) this.particles.burst(n.x, n.y, z.color, 70, 380, 26);
+    this.text(this.player.x, this.player.y - 110, 'ZONE ONLINE', z.color, 28);
     this.ad.mid('Zone unlocked.');
     this.updateUI(true);
   }
@@ -1206,9 +1227,11 @@ export class Game {
     this.player.bind(this);
     for (let i = 0; i < 70; i++) this.nodes[0].update(1, this);
     this.toast('Prestige complete. Permanent value bonus increased.');
-    this.audio.surge();
+    this.audio.prestige();
     Haptics.prestige();
-    this.camera.shake = 24;
+    this.camera.shake = 30;
+    this.punchZoom = 0.22;
+    this.text(this.player.x, this.player.y - 90, 'PRESTIGE', '#ff43df', 32);
     this.save();
     this.updateUI(true);
     this.ad.mid('Prestige reset complete.');
@@ -1276,7 +1299,7 @@ export class Game {
   }
 
   updateUI(full: boolean): void {
-    ui.cash.textContent = money(this.state.cash);
+    ui.cash.textContent = money(this.displayedCash);
     ui.cargo.textContent =
       this.player.carry.length + ' / ' + (this.player.capacity > 900 ? '∞' : this.player.capacity);
     ui.factory.textContent = money(this.offlineRate()) + '/s';
@@ -1549,7 +1572,7 @@ export class Game {
     ctx.fillRect(0, 0, view.W, view.H);
     this.drawParallax();
     ctx.save();
-    this.camera.apply();
+    this.camera.apply(this.punchZoom * 0.15);
     this.drawWorld();
     const render = [...this.items, ...this.objects, ...this.flying, ...this.drones, this.player] as Array<{
       y?: number;

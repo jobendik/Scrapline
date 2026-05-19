@@ -58,10 +58,12 @@ export class Player {
     return 230 * (1 + this.game.up('speed') * 0.08) * (this.game.isFrenzy() ? 1.55 : 1);
   }
   get capacity(): number {
-    return this.game.isFrenzy() ? 999 : 20 + this.game.up('capacity') * 7;
+    if (this.game.isFrenzy()) return 999;
+    return 20 + this.game.up('capacity') * 7 + this.game.tree('t_cargo') * 4;
   }
   get magnet(): number {
-    return 128 * (1 + this.game.up('magnet') * 0.12) * (this.game.isFrenzy() ? 1.7 : 1);
+    const treeMagnet = this.game.tree('t_magnet') * 0.05 + this.game.tree('t_magnet2') * 0.10;
+    return 128 * (1 + this.game.up('magnet') * 0.12 + treeMagnet) * (this.game.isFrenzy() ? 1.7 : 1);
   }
 
   update(dt: number, game: Game): void {

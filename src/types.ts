@@ -222,6 +222,18 @@ export interface SaveState {
   dailyChallenges: DailyChallenge[];
   /** Has the player used their free reroll today? */
   dailyChallengeRerolled: boolean;
+
+  // ----------------------- Pass 4 (v4) — meta layer ----------------------
+
+  /** Prestige tree node levels keyed by node id (see data/prestige-tree.ts). */
+  prestigeNodes: Record<string, number>;
+  /** Sum of PP spent across all tree nodes. availablePP = prestige - prestigeSpent. */
+  prestigeSpent: number;
+
+  /** Active theme id (matches THEMES from data/themes.ts). Defaults to 'cyan'. */
+  activeTheme: string;
+  /** Ids of themes the player has ever satisfied the unlock for. Cosmetic only. */
+  themesOwned: string[];
 }
 
 /**

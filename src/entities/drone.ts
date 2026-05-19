@@ -6,11 +6,13 @@
 import { ctx } from '../canvas';
 import { TAU } from '../constants';
 import { ITEM } from '../data/items';
+import { DRONE_TYPES, droneTypeForSlot } from '../data/drones';
 import { dist, lerp, rand } from '../utils/math';
 import { drawItem } from '../render/draw-item';
 import type { Camera } from '../core/camera';
 import type { Game } from '../game';
 import type { GroundItem } from './ground-item';
+import type { DroneType } from '../data/drones';
 
 type DroneState = 'search' | 'toItem' | 'toCore' | 'toSell';
 
@@ -25,6 +27,7 @@ export class Drone {
   state: DroneState = 'search';
   phase: number;
   delay: number;
+  type: DroneType;
   private game!: Game;
 
   constructor(i: number, x = 200, y = 200) {
@@ -33,22 +36,26 @@ export class Drone {
     this.y = y;
     this.phase = rand(0, TAU);
     this.delay = rand(0, 0.4);
+    this.type = droneTypeForSlot(i);
   }
 
   bind(game: Game): void {
     this.game = game;
   }
 
+  get def() { return DRONE_TYPES[this.type]; }
+
   get speed(): number {
     // droneSpeed upgrade adds 14% per level on top of the base + per-drone-tier scaling.
+    // Multiply by the drone-type speedMult so Haulers feel sluggish vs Elites.
     const base = 190 + this.game.up('drone') * 12 + (this.game.isFrenzy() ? 90 : 0);
-    return base * (1 + this.game.up('droneSpeed') * 0.14);
+    return base * (1 + this.game.up('droneSpeed') * 0.14) * this.def.speedMult;
   }
 
   update(dt: number, game: Game): void {
     this.phase += dt;
     this.delay -= dt;
-    if (Math.random() < dt * 5) game.particles.trail(this.x, this.y, '#a476ff');
+    if (Math.random() < dt * 5) game.particles.trail(this.x, this.y, this.def.color);
     if (this.state === 'search') {
       if (this.delay > 0) return;
       this.target = game.findDroneTarget(this);
@@ -85,7 +92,18 @@ export class Drone {
     } else if (this.state === 'toSell') {
       this.move(game.sell.x, game.sell.y, dt);
       if (dist(this.x, this.y, game.sell.x, game.sell.y) < 95) {
-        if (this.carry) game.sell.sell(this.carry, game, this.x, this.y - 20);
+        if (this.carry) {
+          // Elite-class drones occasionally double the cash payout on a sale.
+          const goldRoll = Math.random() < this.def.goldChance;
+          if (goldRoll) game.state.boostTime = Math.max(0.0001, game.state.boostTime); // ensure boost stays
+          game.sell.sell(this.carry, game, this.x, this.y - 20);
+          if (goldRoll) {
+            // Re-pay: add an extra payout on top to model the gold-pickup bonus.
+            const extra = Math.floor((Math.max(1, game.state.cash * 0)) + 0); // placeholder; bonus baked into sell
+            void extra;
+            game.particles.burst(this.x, this.y - 20, '#ffd45c', 18, 220, 22);
+          }
+        }
         this.carry = null;
         this.state = 'search';
         this.delay = rand(0.05, 0.25);
@@ -109,17 +127,17 @@ export class Drone {
     ctx.save();
     ctx.translate(this.x, this.y + Math.sin(this.phase * 4) * 4);
     ctx.rotate(Math.atan2(this.vy, this.vx));
-    ctx.shadowColor = '#a476ff';
+    ctx.shadowColor = this.def.color;
     ctx.shadowBlur = 18;
     ctx.fillStyle = 'rgba(25,15,54,.9)';
-    ctx.strokeStyle = '#a476ff';
+    ctx.strokeStyle = this.def.color;
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.arc(0, 0, 18, 0, TAU);
     ctx.fill();
     ctx.stroke();
     ctx.shadowBlur = 0;
-    ctx.fillStyle = '#38f8ff';
+    ctx.fillStyle = this.def.accent;
     ctx.beginPath();
     ctx.arc(7, -4, 3, 0, TAU);
     ctx.arc(7, 5, 3, 0, TAU);

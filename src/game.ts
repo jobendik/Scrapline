@@ -27,6 +27,8 @@ import { runDailyCheck } from './core/daily';
 import { renderTutorial, tickTutorial, TUTORIAL_STEPS } from './core/tutorial';
 import { chestFor } from './data/daily-chest';
 import { makeChallenges } from './data/daily-challenges';
+import { TREE_NODES, nodeCost, nodeUnlocked } from './data/prestige-tree';
+import { THEMES, applyTheme } from './data/themes';
 import { Core } from './entities/core';
 import { Drone } from './entities/drone';
 import { FlyingItem } from './entities/flying-item';
@@ -158,6 +160,11 @@ export class Game {
       dailyChallengeDay: 0,
       dailyChallenges: [],
       dailyChallengeRerolled: false,
+      // Pass 4 — meta layer
+      prestigeNodes: {},
+      prestigeSpent: 0,
+      activeTheme: 'cyan',
+      themesOwned: ['cyan'],
     };
   }
 
@@ -175,6 +182,9 @@ export class Game {
     this.state = this.default();
     this.load();
     this.applySettings();
+    // Pass 4 — paint the saved theme onto :root before any other rendering
+    // so the load screen + first frame match the player's preference.
+    applyTheme(this.state.activeTheme || 'cyan');
     this.ad = new AdBridge(this);
     this.player = new Player();
     this.player.bind(this);
@@ -438,6 +448,34 @@ export class Game {
       this.applySettings();
       this.save();
     };
+    this.renderThemePicker();
+  }
+
+  /** Render the 6 theme tiles inside the Menu sheet. Called on init + on theme unlocks. */
+  renderThemePicker(): void {
+    ui.themePicker.innerHTML = '';
+    for (const t of THEMES) {
+      const owned = this.state.themesOwned.includes(t.id) || t.unlocked(this);
+      if (owned && !this.state.themesOwned.includes(t.id)) this.state.themesOwned.push(t.id);
+      const btn = document.createElement('button');
+      btn.className = 'themeBtn' + (owned ? '' : ' locked') + (this.state.activeTheme === t.id ? ' active' : '');
+      btn.innerHTML =
+        `<div class="swatchRow">` +
+        `<span class="sw" style="background:${t.vars['--cyan']}"></span>` +
+        `<span class="sw" style="background:${t.vars['--green']}"></span>` +
+        `<span class="sw" style="background:${t.vars['--pink']}"></span>` +
+        `<span class="sw" style="background:${t.vars['--gold']}"></span>` +
+        `<span class="sw" style="background:${t.vars['--violet']}"></span>` +
+        `</div>` +
+        `<div>${t.name}</div>` +
+        `<div class="req">${owned ? (this.state.activeTheme === t.id ? 'Active' : 'Tap to apply') : t.requirement}</div>`;
+      btn.onclick = () => {
+        if (!owned) return;
+        this.selectTheme(t.id);
+        this.renderThemePicker();
+      };
+      ui.themePicker.appendChild(btn);
+    }
   }
 
   /** Apply persisted settings to the runtime subsystems. */
@@ -539,6 +577,15 @@ export class Game {
       data.dailyChallenges = Array.isArray(data.dailyChallenges) ? data.dailyChallenges : [];
       data.dailyChallengeRerolled = !!data.dailyChallengeRerolled;
     }
+    // v3 -> v4: add prestige tree + theme fields.
+    if (v < 4) {
+      data.version = 4;
+      data.prestigeNodes = (data.prestigeNodes && typeof data.prestigeNodes === 'object') ? data.prestigeNodes : {};
+      data.prestigeSpent = Math.max(0, data.prestigeSpent || 0);
+      data.activeTheme = data.activeTheme || 'cyan';
+      data.themesOwned = Array.isArray(data.themesOwned) && data.themesOwned.length
+        ? data.themesOwned : ['cyan'];
+    }
     return data as Partial<SaveState>;
   }
 
@@ -597,6 +644,16 @@ export class Game {
   up(id: string): number {
     return this.state.up[id] || 0;
   }
+
+  /** Level of a prestige tree node (0 if untouched). */
+  tree(id: string): number {
+    return this.state.prestigeNodes?.[id] || 0;
+  }
+
+  /** Available (unspent) prestige points. */
+  prestigeAvailable(): number {
+    return Math.max(0, (this.state.prestige || 0) - (this.state.prestigeSpent || 0));
+  }
   stats(k: string, v: number): void {
     this.state.stats[k] = (this.state.stats[k] || 0) + v;
   }
@@ -604,8 +661,11 @@ export class Game {
     // prestigeAmp multiplies the per-prestige bonus stack:
     //   bonus = prestige * 0.08 * (1 + prestigeAmp * 0.15)
     const prestigeBonus = this.state.prestige * 0.08 * (1 + this.up('prestigeAmp') * 0.15);
+    const treeResonance = this.tree('t_resonance') * 0.05;
+    const bloom = this.tree('t_bloom') > 0 ? 2 : 1;
     return (
-      (1 + this.up('value') * 0.17) *
+      (1 + this.up('value') * 0.17 + treeResonance) *
+      bloom *
       (this.state.boostTime > 0 ? 2 : 1) *
       (this.isFrenzy() ? 1.35 : 1) *
       (1 + prestigeBonus)
@@ -614,14 +674,15 @@ export class Game {
 
   /** Probability that a single sale crits to 2× payout. */
   critChance(): number {
-    return this.up('crit') * 0.04;
+    return this.up('crit') * 0.04 + this.tree('t_crit') * 0.03;
   }
 
   /** Interval (seconds) between magnet-pulse AoE collects. 0 means disabled. */
   pulseInterval(): number {
     const lvl = this.up('pulse');
     if (lvl <= 0) return 0;
-    return Math.max(2, 8 - lvl);
+    const baseInterval = Math.max(2, 8 - lvl);
+    return baseInterval * Math.max(0.4, 1 - this.tree('t_pulse') * 0.12);
   }
 
   /** How many product sells trigger a free raw recycle. 0 means disabled. */
@@ -753,6 +814,63 @@ export class Game {
     this.updateUI(true);
   }
 
+  // ============================ Pass 4 — meta ============================
+
+  /** Spend prestige points on a tree node. Validates gate + prereqs + budget. */
+  buyTreeNode(id: string): void {
+    const def = TREE_NODES.find((n) => n.id === id);
+    if (!def) return;
+    const lvl = this.tree(id);
+    if (lvl >= def.max) return;
+    if (!nodeUnlocked(this, def)) {
+      this.toast('Node not yet unlocked.');
+      this.audio.err();
+      return;
+    }
+    const cost = nodeCost(def, lvl);
+    if (this.prestigeAvailable() < cost) {
+      this.toast(`Need ${cost} PP (have ${this.prestigeAvailable()}).`);
+      this.audio.err();
+      return;
+    }
+    if (!this.state.prestigeNodes) this.state.prestigeNodes = {};
+    this.state.prestigeNodes[id] = lvl + 1;
+    this.state.prestigeSpent = (this.state.prestigeSpent || 0) + cost;
+    this.applyDrones();
+    this.audio.buy();
+    Haptics.buy();
+    this.toast(`${def.name} → L${lvl + 1}`);
+    this.particles.burst(this.player.x, this.player.y, '#ff43df', 24, 200, 18);
+    this.save();
+    this.updateUI(true);
+  }
+
+  /** Re-evaluate which themes the player qualifies for and add to owned set. */
+  refreshThemeOwnership(): void {
+    let added = false;
+    for (const t of THEMES) {
+      if (this.state.themesOwned.includes(t.id)) continue;
+      if (t.unlocked(this)) {
+        this.state.themesOwned.push(t.id);
+        added = true;
+        this.toast(`Theme unlocked: ${t.name}`);
+      }
+    }
+    if (added) this.save();
+  }
+
+  /** Switch active theme. Persists immediately so a reload keeps the pick. */
+  selectTheme(id: string): void {
+    if (!this.state.themesOwned.includes(id)) {
+      this.toast('Theme locked.');
+      return;
+    }
+    this.state.activeTheme = id;
+    applyTheme(id);
+    this.save();
+    this.audio.buy();
+  }
+
   /** Player-triggered reroll of today's challenge set. One free per UTC day. */
   rerollDailyChallenges(): void {
     if (this.state.dailyChallengeRerolled) {
@@ -805,7 +923,10 @@ export class Game {
     this.text(this.core.x, this.core.y - 90, '+1 RECYCLED', '#45ff93', 14);
   }
   offlineRate(): number {
-    return (this.up('drone') * 0.75 + this.up('processor') * 0.35 + 1) * this.valueMult() * (1 + this.up('offline') * 0.2);
+    return (this.up('drone') * 0.75 + this.up('processor') * 0.35 + 1) *
+      this.valueMult() *
+      (1 + this.up('offline') * 0.2) *
+      (1 + this.tree('t_offline') * 0.12);
   }
   isFrenzy(): boolean {
     return this.state.frenzyTime > 0;
@@ -829,30 +950,48 @@ export class Game {
     this.particles.burst(this.player.x, this.player.y, '#ff43df', 70, 430, 26);
   }
 
+  /** Total drone slot count = base upgrade level + tree bonus. */
+  droneSlotCount(): number {
+    return this.up('drone') + this.tree('t_drone');
+  }
+
   applyDrones(): void {
-    while (this.drones.length < this.up('drone')) {
+    const target = this.droneSlotCount();
+    while (this.drones.length < target) {
       const d = new Drone(this.drones.length, this.term ? this.term.x : 0, this.term ? this.term.y : 0);
       d.bind(this);
       this.drones.push(d);
     }
-    while (this.drones.length > this.up('drone')) this.drones.pop();
+    while (this.drones.length > target) this.drones.pop();
     this.state.stats.droneBest = Math.max(this.state.stats.droneBest, this.drones.length);
   }
 
   findDroneTarget(drone: Drone): GroundItem | null {
+    const prefer = drone.def.prefer;
     let best: GroundItem | null = null;
     let bd = Infinity;
+    // First pass: items matching the drone's preference.
     for (const it of this.items) {
       if (it.targeted) continue;
       const kind = ITEM[it.type].kind;
-      if (kind === 'raw' || kind === 'product') {
+      if (prefer === 'raw' && kind !== 'raw') continue;
+      if (prefer === 'product' && kind !== 'product') continue;
+      if (kind !== 'raw' && kind !== 'product') continue;
+      const dx = drone.x - it.x;
+      const dy = drone.y - it.y;
+      const dd = dx * dx + dy * dy;
+      if (dd < bd) { bd = dd; best = it; }
+    }
+    // Fall back to any item if preference produced no hits (avoid idle drones).
+    if (!best && prefer !== 'any') {
+      for (const it of this.items) {
+        if (it.targeted) continue;
+        const kind = ITEM[it.type].kind;
+        if (kind !== 'raw' && kind !== 'product') continue;
         const dx = drone.x - it.x;
         const dy = drone.y - it.y;
         const dd = dx * dx + dy * dy;
-        if (dd < bd) {
-          bd = dd;
-          best = it;
-        }
+        if (dd < bd) { bd = dd; best = it; }
       }
     }
     return best;
@@ -1025,12 +1164,38 @@ export class Game {
     if (!confirm('Prestige now? Reset factory for +' + gain + ' permanent prestige points.')) return;
     const keep = this.state.prestige + gain;
     const runs = this.state.prestigeRuns + 1;
+    // Preserve tree-spent + ownership when resetting so the prestige tree
+    // isn't wiped on every reboot.
+    const keptNodes = this.state.prestigeNodes;
+    const keptSpent = this.state.prestigeSpent;
+    const keptTheme = this.state.activeTheme;
+    const keptOwned = this.state.themesOwned;
+    const keptSettings = this.state.settings;
+    const keptTutorialDone = this.state.tutorialDone;
+    const keptTutorialStep = this.state.tutorialStep;
+    const keptStreak = this.state.streakDays;
+    const keptLastLogin = this.state.lastLoginUTC;
+    const keptChestDay = this.state.chestDay;
+    const keptChestClaimedToday = this.state.chestClaimedToday;
+
+    const startingCash = 250 + (keptNodes?.['t_bank'] || 0) * 250;
     const base = this.default();
     base.prestige = keep;
     base.prestigeRuns = runs;
-    base.cash = 250;
+    base.cash = startingCash;
     base.totalCash = 0;
     base.stats.prestigeRuns = runs;
+    base.prestigeNodes = keptNodes;
+    base.prestigeSpent = keptSpent;
+    base.activeTheme = keptTheme;
+    base.themesOwned = keptOwned;
+    base.settings = keptSettings;
+    base.tutorialDone = keptTutorialDone;
+    base.tutorialStep = keptTutorialStep;
+    base.streakDays = keptStreak;
+    base.lastLoginUTC = keptLastLogin;
+    base.chestDay = keptChestDay;
+    base.chestClaimedToday = keptChestClaimedToday;
     this.state = base;
     this.items = [];
     this.flying = [];
@@ -1162,6 +1327,8 @@ export class Game {
     this.updateBadges();
     renderTutorial(this);
     if (full) {
+      this.refreshThemeOwnership();
+      this.renderThemePicker();
       this.buildProgress();
       this.buildShop();
     }
@@ -1336,7 +1503,7 @@ export class Game {
     const row = document.createElement('div');
     row.className = 'row';
     const gain = this.prestigeGain();
-    row.innerHTML = `<div class="main"><div class="name" style="color:#ffd45c">Prestige Reboot</div><div class="desc">Reset for permanent value bonus. Gain: +${gain} prestige.</div></div>`;
+    row.innerHTML = `<div class="main"><div class="name" style="color:#ffd45c">Prestige Reboot</div><div class="desc">Reset for permanent value bonus. Gain: +${gain} PP. Available: ${this.prestigeAvailable()} PP.</div></div>`;
     const b = document.createElement('button');
     b.textContent = gain > 0 ? 'PRESTIGE' : 'LOCKED';
     b.className = 'warn';
@@ -1344,6 +1511,31 @@ export class Game {
     b.onclick = () => this.prestige();
     row.appendChild(b);
     ui.upgrades.appendChild(row);
+
+    // ----------------------- Prestige tree section -----------------------
+    if ((this.state.prestige || 0) > 0 || this.state.prestigeRuns > 0) {
+      const heading = document.createElement('div');
+      heading.className = 'sectionHeading';
+      heading.innerHTML = `<span>Prestige Tree</span><span class="muted">${this.prestigeAvailable()} PP available</span>`;
+      ui.upgrades.appendChild(heading);
+      for (const node of TREE_NODES) {
+        const lvl = this.tree(node.id);
+        const max = lvl >= node.max;
+        const unlocked = nodeUnlocked(this, node);
+        const cost = nodeCost(node, lvl);
+        const row2 = document.createElement('div');
+        row2.className = 'row' + (unlocked ? '' : ' locked');
+        const tierColor = node.tier === 'singularity' ? '#ff43df' : node.tier === 'reset' ? '#ffd45c' : '#a476ff';
+        row2.innerHTML = `<div class="main"><div class="name" style="color:${tierColor}">${node.name} <span style="color:#82a6b7">L${lvl}/${node.max}</span></div><div class="desc">${node.desc(lvl)} · ${unlocked ? `cost ${cost} PP` : `unlock at ${node.gate} earned PP`}</div></div>`;
+        const tb = document.createElement('button');
+        tb.textContent = max ? 'MAX' : unlocked ? `${cost} PP` : 'LOCKED';
+        tb.className = !max && unlocked && this.prestigeAvailable() >= cost ? 'premium' : '';
+        tb.disabled = max || !unlocked || this.prestigeAvailable() < cost;
+        tb.onclick = () => this.buyTreeNode(node.id);
+        row2.appendChild(tb);
+        ui.upgrades.appendChild(row2);
+      }
+    }
   }
 
   draw(): void {

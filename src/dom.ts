@@ -101,6 +101,7 @@ export const ui = {
   settingMusic: el<HTMLButtonElement>('settingMusic'),
   settingHaptics: el<HTMLButtonElement>('settingHaptics'),
   settingGfx: el<HTMLSelectElement>('settingGfx'),
+  themePicker: el('themePicker'),
 
   // Loading screen (hidden by main.ts once boot finishes).
   loadScreen: el('loadScreen'),

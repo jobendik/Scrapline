@@ -458,6 +458,51 @@ button.danger {
 .menuActions button { min-height: 44px; }
 .menuActions button:first-child { grid-column: 1 / -1; }
 
+.themePickerWrap {
+  padding: 10px 4px;
+  border-top: 1px dashed rgba(255, 255, 255, .05);
+  border-bottom: 1px dashed rgba(255, 255, 255, .05);
+}
+.themePicker {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  margin-top: 8px;
+}
+.themeBtn {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 10px 8px; min-height: 64px;
+  border-radius: 14px; cursor: pointer; position: relative;
+  background: rgba(0, 0, 0, .24);
+  border: 1px solid rgba(255, 255, 255, .12);
+  color: var(--text); font-family: inherit;
+  font-size: 11px; font-weight: 800;
+  text-align: center;
+  gap: 4px;
+}
+.themeBtn .swatchRow {
+  display: flex; gap: 4px; margin-bottom: 4px;
+}
+.themeBtn .sw {
+  width: 10px; height: 10px; border-radius: 3px;
+  box-shadow: 0 0 4px currentColor;
+}
+.themeBtn.active {
+  border-color: var(--cyan); box-shadow: 0 0 12px rgba(56, 248, 255, .35);
+}
+.themeBtn.locked {
+  opacity: .42; cursor: not-allowed; filter: saturate(.4);
+}
+.themeBtn .req {
+  font-size: 9px; color: var(--muted); font-weight: 600;
+}
+
+.sectionHeading {
+  display: flex; justify-content: space-between; align-items: center;
+  margin: 14px 0 6px; padding-top: 8px;
+  border-top: 1px solid rgba(56, 248, 255, .18);
+  font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+  color: #c9fbff; font-weight: 950;
+}
+
 .credits {
   margin-top: 4px;
   font-size: 11px; color: var(--muted); text-align: center;

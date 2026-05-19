@@ -38,7 +38,8 @@ export class Core {
   }
 
   get speed(): number {
-    return 1.2 * (1 + this.game.up('processor') * 0.14) * (this.game.isFrenzy() ? 1.6 : 1);
+    const treeForge = this.game.tree('t_forge') * 0.05 + this.game.tree('t_forge2') * 0.12;
+    return 1.2 * (1 + this.game.up('processor') * 0.14 + treeForge) * (this.game.isFrenzy() ? 1.6 : 1);
   }
 
   update(dt: number, game: Game): void {

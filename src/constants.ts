@@ -4,7 +4,7 @@
  * ========================================================================== */
 
 /** Current persisted save schema version. Bumped whenever SaveState changes. */
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 /** localStorage key for the current schema. */
 export const SAVE_KEY = 'scrapline.v2.save';

@@ -2,29 +2,41 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="description" content="Scrapline — neon cyberpunk idle-tycoon. Collect scrap, run the Core, ship parts, automate with drones." />
   <meta name="theme-color" content="#020611" />
-  <title>Neon Scrapline: Factory Frenzy</title>
+  <title>Scrapline</title>
 </head>
 <body>
   <div id="shell">
     <canvas id="game"></canvas>
     <div class="edge" id="frenzyEdge"></div>
+
     <div class="hud">
+      <!-- Top chips. Profile pill (Level + Prestige) is split out so mobile can
+           drop the Level/Prestige chips while keeping the info reachable. -->
       <div class="topbar">
         <div class="chip"><div class="label">Cash</div><div class="value" id="cashValue">$0</div></div>
         <div class="chip"><div class="label">Cargo</div><div class="value" id="cargoValue">0 / 20</div></div>
         <div class="chip"><div class="label">Factory</div><div class="value" id="factoryValue">0/s</div></div>
-        <div class="chip"><div class="label">Level</div><div class="value" id="levelValue">1</div></div>
-        <div class="chip"><div class="label">Prestige</div><div class="value" id="prestigeValue">0</div></div>
+        <div class="chip lvlChip"><div class="label">Level</div><div class="value" id="levelValue">1</div></div>
+        <div class="chip lvlChip"><div class="label">Prestige</div><div class="value" id="prestigeValue">0</div></div>
       </div>
+
+      <button class="profilePill" id="profilePill" type="button" aria-label="Open profile">
+        <span class="profileLine"><span class="profileK">LV</span><span id="profileLevel">1</span></span>
+        <span class="profileLine"><span class="profileK">PR</span><span id="profilePrestige">0</span></span>
+      </button>
+
       <div class="title">
-        <h1>Neon Scrapline</h1>
-        <p>Factory Frenzy · arcade idle tycoon</p>
+        <h1>Scrapline</h1>
+        <p>Neon idle tycoon · CrazyGames build</p>
       </div>
+
       <div class="status" id="statusLine">Collect raw scrap, process it, sell components, automate the factory.</div>
-      <section class="panel left">
+
+      <!-- Desktop side panels. On mobile these CSS-transform into bottom sheets. -->
+      <section class="panel left" id="panelGoals" data-sheet="goals">
         <h2>Progress <span id="progressHint">contracts</span></h2>
         <div class="tabs">
           <div class="tab active" id="tabContracts">Contracts</div>
@@ -33,31 +45,135 @@
         </div>
         <div class="scroll" id="progressList"></div>
         <div class="smallNote">Designed for retention: contracts, market orders, achievements, offline earnings and prestige.</div>
+        <button class="sheetClose" data-sheet-close="goals" aria-label="Close panel">Close</button>
       </section>
-      <section class="panel right">
+
+      <section class="panel right" id="panelShop" data-sheet="shop">
         <h2>Upgrade Terminal <span id="shopHint">stand near ↑</span></h2>
         <div class="scroll" id="upgradeList"></div>
+        <button class="sheetClose" data-sheet-close="shop" aria-label="Close panel">Close</button>
       </section>
-      <section class="bottom">
+
+      <!-- Boosts sheet — mobile-primary; desktop shows the same buttons in .bottom. -->
+      <section class="panel sheet sheetBoosts" id="panelBoosts" data-sheet="boosts">
+        <h2>Boosts <span class="muted">rewarded</span></h2>
+        <div class="sheetBody">
+          <button class="premium boostBtn" id="rewardValueBtnSheet">
+            <span class="boostHead">Reward Ad · 2× Value</span>
+            <span class="boostSub">Doubles sell price for 3 minutes.</span>
+          </button>
+          <button class="premium boostBtn" id="rewardFrenzyBtnSheet">
+            <span class="boostHead">Reward Ad · Frenzy</span>
+            <span class="boostSub">Speed, magnet, infinite cargo + scrap surge.</span>
+          </button>
+          <p class="smallNote">Boosts are powered by CrazyGames rewarded ads. They never trigger without your tap.</p>
+        </div>
+        <button class="sheetClose" data-sheet-close="boosts" aria-label="Close panel">Close</button>
+      </section>
+
+      <!-- Menu sheet — save / settings / credits. The desktop .bottom row also
+           hosts the save/sound/export/import/reset buttons; they're duplicated
+           here for mobile reach. Setting toggles only live in this sheet. -->
+      <section class="panel sheet sheetMenu" id="panelMenu" data-sheet="menu">
+        <h2>Menu <span class="muted">save · settings</span></h2>
+        <div class="sheetBody">
+          <div class="settingsBlock">
+            <div class="settingRow">
+              <div>
+                <div class="settingName">Sound</div>
+                <div class="settingDesc">SFX and ambient tick.</div>
+              </div>
+              <button class="toggle" id="settingSound" data-on="false" aria-pressed="false">Off</button>
+            </div>
+            <div class="settingRow">
+              <div>
+                <div class="settingName">Music</div>
+                <div class="settingDesc">Background loop. (Composed in a later pass.)</div>
+              </div>
+              <button class="toggle" id="settingMusic" data-on="false" aria-pressed="false">Off</button>
+            </div>
+            <div class="settingRow">
+              <div>
+                <div class="settingName">Haptics</div>
+                <div class="settingDesc">Mobile vibration on big events.</div>
+              </div>
+              <button class="toggle" id="settingHaptics" data-on="false" aria-pressed="false">Off</button>
+            </div>
+            <div class="settingRow">
+              <div>
+                <div class="settingName">Graphics</div>
+                <div class="settingDesc">Auto detects, or pick a quality.</div>
+              </div>
+              <select class="select" id="settingGfx">
+                <option value="auto">Auto</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="menuActions">
+            <button class="good" id="saveBtn">Save</button>
+            <button id="exportBtn">Export</button>
+            <button id="importBtn">Import</button>
+            <button class="danger" id="resetBtn">Reset</button>
+          </div>
+
+          <div class="credits">
+            <div>Scrapline · made by Jo Bendik</div>
+            <div class="creditsLine">Neon cyberpunk idle tycoon · CrazyGames build</div>
+          </div>
+        </div>
+        <button class="sheetClose" data-sheet-close="menu" aria-label="Close panel">Close</button>
+      </section>
+
+      <!-- Desktop action row — hidden on mobile in favour of the bottom nav.
+           Reward buttons here mirror the ones in the Boosts sheet. -->
+      <section class="bottom desktopBottom">
         <button class="premium" id="rewardValueBtn">Reward: 2× Value</button>
         <button class="premium" id="rewardFrenzyBtn">Reward: Frenzy</button>
-        <button class="good" id="saveBtn">Save</button>
+        <button class="good" id="saveBtnDesktop">Save</button>
         <button id="soundBtn">Sound: Off</button>
-        <button id="exportBtn">Export</button>
-        <button id="importBtn">Import</button>
-        <button class="danger" id="resetBtn">Reset</button>
+        <button id="exportBtnDesktop">Export</button>
+        <button id="importBtnDesktop">Import</button>
+        <button class="danger" id="resetBtnDesktop">Reset</button>
       </section>
+
+      <!-- Mobile bottom navigation. 5 tabs, 56×56 targets, safe-area padded. -->
+      <nav class="bnav" id="bnav" role="tablist">
+        <button class="nbtn" data-nav="home" aria-label="Home">
+          <span class="nicon">▲</span><span class="nlabel">Home</span>
+        </button>
+        <button class="nbtn" data-nav="goals" aria-label="Goals">
+          <span class="nicon">◎</span><span class="nlabel">Goals</span>
+          <span class="dot" id="navDotGoals" hidden></span>
+        </button>
+        <button class="nbtn" data-nav="shop" aria-label="Shop">
+          <span class="nicon">↑</span><span class="nlabel">Shop</span>
+          <span class="dot" id="navDotShop" hidden></span>
+        </button>
+        <button class="nbtn" data-nav="boosts" aria-label="Boosts">
+          <span class="nicon">⚡</span><span class="nlabel">Boosts</span>
+        </button>
+        <button class="nbtn" data-nav="menu" aria-label="Menu">
+          <span class="nicon">≡</span><span class="nlabel">Menu</span>
+        </button>
+      </nav>
+
       <div class="toast" id="toast"></div>
       <div class="mobilePad" id="mobilePad"><div id="mobileKnob"></div></div>
+
       <div class="storage hidden" id="storageWarn">
         Storage is temporary in this sandbox. Export your save if you want to keep progress.<br>
         <button id="storageOk">OK</button>
       </div>
     </div>
+
     <div class="modal" id="introModal">
       <div class="card">
-        <h1>Neon Scrapline</h1>
-        <p>The ultimate one-file CrazyGames-style prototype: active arcade collecting, physical factory chains, autonomous drones, contracts, market orders, achievements, rewarded boosts, offline progress and prestige.</p>
+        <h1>Scrapline</h1>
+        <p>Active arcade collecting, physical factory chains, autonomous drones, contracts, market orders, achievements, rewarded boosts, offline progress and prestige.</p>
         <div class="tips">
           <div class="tip"><b>Move</b><br>WASD / arrows / drag</div>
           <div class="tip"><b>Collect</b><br>Raw scrap from neon zones</div>
@@ -67,12 +183,23 @@
         <button class="good" id="startBtn">Start Factory</button>
       </div>
     </div>
+
     <div class="adBox hidden" id="adBox">
       <h3 id="adTitle">Ad Break</h3>
       <p id="adText">The game is paused while the ad slot is handled.</p>
       <button id="adCloseBtn">Continue</button>
     </div>
+
     <input class="fileInput" type="file" id="fileInput" accept=".json,application/json" />
+
+    <!-- Branded loading screen. Sits on top of everything until main.ts
+         finishes booting and hides it. Never shows blank canvas. -->
+    <div id="loadScreen" class="loadScreen">
+      <div class="loadLogo">SCRAPLINE</div>
+      <div class="loadTag">factory frenzy · neon idle</div>
+      <div class="loadBar"><div class="loadFill" id="loadFill"></div></div>
+      <div class="loadHint" id="loadHint">Spooling neon grid…</div>
+    </div>
   </div>
   <script type="module" src="/src/main.ts"></script>
 </body>

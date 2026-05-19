@@ -128,8 +128,28 @@ export interface MarketOrder {
   claimed: boolean;
 }
 
+/** Graphics quality preset chosen by the player (or 'auto'). */
+export type GfxQuality = 'auto' | 'low' | 'medium' | 'high';
+
+/** Player-facing options stored in the save. */
+export interface SettingsState {
+  /** SFX on/off. Mirrors AudioSys.on so it survives reloads. */
+  sound: boolean;
+  /** Background music on/off. (Music itself is not wired until Pass 5.) */
+  music: boolean;
+  /** Haptic feedback (vibrate API) on/off. Defaults: ON mobile, OFF desktop. */
+  haptics: boolean;
+  /** Graphics quality preset. */
+  gfx: GfxQuality;
+}
+
 /** Persistent save state — see {@link Game.default}. */
 export interface SaveState {
+  /**
+   * Schema version. Bumped whenever new fields are added. The Game.load
+   * migration ladder maps older saves up to the current shape.
+   */
+  version: number;
   cash: number;
   totalCash: number;
   level: number;
@@ -145,6 +165,10 @@ export interface SaveState {
   frenzyTime: number;
   lastSave: number;
   stats: Record<StatKey, number>;
+  /** v2: player-facing settings — sound, music, haptics, graphics. */
+  settings: SettingsState;
+  /** v2: flips true once the first-time tutorial completes. (Wired in Pass 3.) */
+  tutorialDone: boolean;
 }
 
 /**

@@ -8,8 +8,8 @@
  * ========================================================================== */
 
 import { canvas, ctx, resize, view } from './canvas';
-import { SAVE_KEY, TAU } from './constants';
-import { ui } from './dom';
+import { SAVE_KEY, SAVE_KEY_LEGACY_V1, SAVE_VERSION, TAU, isMobile } from './constants';
+import { ui, NAV_SHEETS } from './dom';
 import { ACH } from './data/achievements';
 import { CONTRACTS } from './data/contracts';
 import { ITEM } from './data/items';
@@ -19,6 +19,7 @@ import { ZONES } from './data/zones';
 import { AdBridge } from './core/ad-bridge';
 import { AudioSys } from './core/audio';
 import { Camera } from './core/camera';
+import { Haptics } from './core/haptics';
 import { Input } from './core/input';
 import { Particles } from './core/particles';
 import { TextPop } from './core/text-pop';
@@ -34,7 +35,7 @@ import { clamp } from './utils/math';
 import { money, rr, units } from './utils/format';
 import { safeStorage } from './utils/storage';
 import type { Camera as CameraT } from './core/camera';
-import type { SaveState, ZoneDef } from './types';
+import type { GfxQuality, SaveState, SettingsState, ZoneDef } from './types';
 
 const storage = safeStorage();
 if (!storage.persistent) ui.storageWarn.classList.remove('hidden');
@@ -81,7 +82,7 @@ export class Game {
   // ---------------- persistent state ----------------
   state!: SaveState;
 
-  /** Build a fresh default save state. */
+  /** Build a fresh default save state. Always returns the current SAVE_VERSION shape. */
   default(): SaveState {
     const up: Record<string, number> = {};
     UPGRADES.forEach((u) => (up[u.id] = 0));
@@ -92,6 +93,7 @@ export class Game {
     CONTRACTS.forEach((x) => (c[x.id] = false));
     ACH.forEach((x) => (a[x.id] = false));
     return {
+      version: SAVE_VERSION,
       cash: 0,
       totalCash: 0,
       level: 1,
@@ -118,12 +120,25 @@ export class Game {
         frenzies: 0,
         singDriveSold: 0,
       },
+      settings: this.defaultSettings(),
+      tutorialDone: false,
+    };
+  }
+
+  /** Default player settings. Haptics default to ON on mobile, OFF on desktop. */
+  defaultSettings(): SettingsState {
+    return {
+      sound: false,
+      music: false,
+      haptics: isMobile(),
+      gfx: 'auto',
     };
   }
 
   init(): void {
     this.state = this.default();
     this.load();
+    this.applySettings();
     this.ad = new AdBridge(this);
     this.player = new Player();
     this.player.bind(this);
@@ -140,57 +155,98 @@ export class Game {
     if (this.state.zones.glass) for (let i = 0; i < 50; i++) this.nodes[1].update(1, this);
 
     this.bind();
+    this.bindNav();
+    this.bindSettings();
+    this.setActiveNav('home');
     this.updateUI(true);
     requestAnimationFrame(() => this.loop());
   }
 
   bind(): void {
     ui.start.onclick = async () => {
-      try {
-        const on = await this.audio.toggle();
-        ui.sound.textContent = 'Sound: ' + (on ? 'On' : 'Off');
-      } catch (_e) {
-        // Ignore — audio is best-effort on first gesture.
+      // First user gesture: ensures the AudioContext is allowed to resume on
+      // iOS. We always call ensure() even if sound is off so future toggles
+      // don't fail silently.
+      this.audio.ensure();
+      if (this.state.settings.sound) {
+        // Settings say "Sound: On" — sync the audio system.
+        try {
+          if (!this.audio.on) await this.audio.toggle();
+        } catch (_e) { /* best-effort */ }
       }
+      this.syncSoundLabel();
       ui.intro.classList.add('hidden');
       this.started = true;
-      this.toast('Factory online. Collect raw scrap and feed the Neon Core.');
+      this.toast('Factory online. Collect raw scrap and feed the Core.');
+      Haptics.zoneUnlock();
     };
-    ui.sound.onclick = async () => {
-      const on = await this.audio.toggle();
-      ui.sound.textContent = 'Sound: ' + (on ? 'On' : 'Off');
+
+    const onSoundClick = async () => {
+      try {
+        const on = await this.audio.toggle();
+        this.state.settings.sound = on;
+        this.syncSoundLabel();
+        this.save();
+      } catch (_e) { /* best-effort */ }
     };
-    ui.save.onclick = () => {
+    ui.sound.onclick = onSoundClick;
+
+    const onSaveClick = () => {
       this.save();
       this.toast('Saved.');
     };
-    ui.export.onclick = () => this.exportSave();
-    ui.import.onclick = () => ui.fileInput.click();
+    ui.save.onclick = onSaveClick;
+    ui.saveDesktop && (ui.saveDesktop.onclick = onSaveClick);
+
+    const onExport = () => this.exportSave();
+    ui.export.onclick = onExport;
+    ui.exportDesktop && (ui.exportDesktop.onclick = onExport);
+
+    const onImport = () => ui.fileInput.click();
+    ui.import.onclick = onImport;
+    ui.importDesktop && (ui.importDesktop.onclick = onImport);
     ui.fileInput.onchange = (e) => this.importSave(e);
-    ui.reset.onclick = () => {
+
+    const onReset = (btn: HTMLButtonElement) => {
       if (!this.resetArmed) {
         this.resetArmed = true;
-        ui.reset.textContent = 'Confirm Reset';
+        btn.textContent = 'Confirm Reset';
+        if (ui.reset !== btn) ui.reset.textContent = 'Confirm Reset';
+        if (ui.resetDesktop && ui.resetDesktop !== btn) ui.resetDesktop.textContent = 'Confirm Reset';
         this.toast('Press reset again to wipe progress.');
         setTimeout(() => {
           this.resetArmed = false;
           ui.reset.textContent = 'Reset';
+          if (ui.resetDesktop) ui.resetDesktop.textContent = 'Reset';
         }, 3500);
         return;
       }
+      // Wipe both the current and legacy keys — defensive against a stale
+      // pre-migration save lingering in some browsers.
       storage.del(SAVE_KEY);
+      storage.del(SAVE_KEY_LEGACY_V1);
       location.reload();
     };
-    ui.rewardValue.onclick = () =>
+    ui.reset.onclick = () => onReset(ui.reset);
+    ui.resetDesktop && (ui.resetDesktop.onclick = () => onReset(ui.resetDesktop!));
+
+    const onRewardValue = () =>
       this.ad.rewarded('2× sell value for 3 minutes.', () => {
         this.state.boostTime = Math.max(this.state.boostTime, 180);
         this.audio.buy();
+        Haptics.buy();
         this.particles.burst(this.player.x, this.player.y, '#ff43df', 36, 260, 22);
       });
-    ui.rewardFrenzy.onclick = () =>
+    ui.rewardValue.onclick = onRewardValue;
+    ui.rewardValueSheet.onclick = onRewardValue;
+
+    const onRewardFrenzy = () =>
       this.ad.rewarded('Frenzy: speed, magnet, infinite cargo and huge scrap density.', () =>
         this.startFrenzy(),
       );
+    ui.rewardFrenzy.onclick = onRewardFrenzy;
+    ui.rewardFrenzySheet.onclick = onRewardFrenzy;
+
     ui.adClose.onclick = () => this.ad.hide();
     ui.tabContracts.onclick = () => this.setTab('contracts');
     ui.tabMarket.onclick = () => this.setTab('market');
@@ -198,23 +254,161 @@ export class Game {
     addEventListener('beforeunload', () => this.save());
   }
 
+  /** Sync the desktop Sound button label with the current setting. */
+  private syncSoundLabel(): void {
+    const on = this.state.settings.sound;
+    ui.sound.textContent = 'Sound: ' + (on ? 'On' : 'Off');
+  }
+
+  /**
+   * Bind the mobile bottom nav + sheet close buttons. The "home" tab simply
+   * closes any open sheet. Re-tapping the active tab also closes its sheet.
+   */
+  bindNav(): void {
+    for (const btn of ui.navButtons) {
+      const which = btn.dataset.nav;
+      if (!which) continue;
+      btn.onclick = () => {
+        if (which === 'home') {
+          this.closeAllSheets();
+          this.setActiveNav('home');
+          return;
+        }
+        const sheet = NAV_SHEETS[which];
+        if (!sheet) return;
+        if (sheet.classList.contains('open')) {
+          this.closeAllSheets();
+          this.setActiveNav('home');
+        } else {
+          this.openSheet(which);
+        }
+      };
+    }
+    for (const btn of ui.sheetCloseButtons) {
+      btn.onclick = () => {
+        this.closeAllSheets();
+        this.setActiveNav('home');
+      };
+    }
+    ui.profilePill.onclick = () => this.openSheet('menu');
+  }
+
+  /** Open one sheet, hide the others, and reflect state in the bottom nav. */
+  openSheet(which: string): void {
+    for (const [k, el] of Object.entries(NAV_SHEETS)) {
+      el.classList.toggle('open', k === which);
+    }
+    this.setActiveNav(which);
+    // Rebuild the panel contents whenever we open it — keeps the dot/cost
+    // hints in sync after offline cash etc.
+    if (which === 'goals' || which === 'shop') this.updateUI(true);
+  }
+
+  closeAllSheets(): void {
+    for (const el of Object.values(NAV_SHEETS)) el.classList.remove('open');
+  }
+
+  setActiveNav(which: string): void {
+    for (const btn of ui.navButtons) {
+      btn.classList.toggle('active', btn.dataset.nav === which);
+    }
+  }
+
+  /** Wire the settings inputs in the Menu sheet. */
+  bindSettings(): void {
+    const setToggle = (btn: HTMLButtonElement, val: boolean): void => {
+      btn.dataset.on = val ? 'true' : 'false';
+      btn.setAttribute('aria-pressed', val ? 'true' : 'false');
+      btn.textContent = val ? 'On' : 'Off';
+    };
+    setToggle(ui.settingSound, this.state.settings.sound);
+    setToggle(ui.settingMusic, this.state.settings.music);
+    setToggle(ui.settingHaptics, this.state.settings.haptics);
+    ui.settingGfx.value = this.state.settings.gfx;
+
+    ui.settingSound.onclick = async () => {
+      const next = !this.state.settings.sound;
+      this.state.settings.sound = next;
+      setToggle(ui.settingSound, next);
+      // Sync audio system.
+      if (next) {
+        this.audio.ensure();
+        if (!this.audio.on) {
+          try { await this.audio.toggle(); } catch (_e) { /* best-effort */ }
+        }
+      } else if (this.audio.on) {
+        try { await this.audio.toggle(); } catch (_e) { /* best-effort */ }
+      }
+      this.syncSoundLabel();
+      this.save();
+    };
+    ui.settingMusic.onclick = () => {
+      const next = !this.state.settings.music;
+      this.state.settings.music = next;
+      setToggle(ui.settingMusic, next);
+      // Music itself is wired in a later pass — flag persisted for now.
+      this.save();
+    };
+    ui.settingHaptics.onclick = () => {
+      const next = !this.state.settings.haptics;
+      this.state.settings.haptics = next;
+      setToggle(ui.settingHaptics, next);
+      Haptics.enabled = next;
+      if (next) Haptics.buy(); // small confirmation buzz
+      this.save();
+    };
+    ui.settingGfx.onchange = () => {
+      this.state.settings.gfx = ui.settingGfx.value as GfxQuality;
+      this.applySettings();
+      this.save();
+    };
+  }
+
+  /** Apply persisted settings to the runtime subsystems. */
+  applySettings(): void {
+    Haptics.enabled = this.state.settings.haptics && Haptics.supported;
+    // Graphics quality is currently advisory — entity culling already adapts
+    // to view size. The select is wired so future passes (parallax intensity,
+    // particle caps, glow shadows) can read from this single source.
+    void this.state.settings.gfx;
+  }
+
+  /**
+   * Load any persisted save. Migration ladder:
+   *   - First, try the current schema key (scrapline.v2.save).
+   *   - If absent, fall back to the v1 legacy key, migrate, and delete v1.
+   *   - On parse / migrate failure, leave the fresh default save in place
+   *     and surface a one-time toast so the player knows.
+   * Returns silently when nothing was loaded — the constructor already
+   * populated this.state with defaults.
+   */
   load(): void {
+    let raw = storage.get(SAVE_KEY);
+    let migratedFromLegacy = false;
+    if (!raw) {
+      const legacy = storage.get(SAVE_KEY_LEGACY_V1);
+      if (legacy) {
+        raw = legacy;
+        migratedFromLegacy = true;
+      }
+    }
+    if (!raw) return;
     try {
-      const raw = storage.get(SAVE_KEY);
-      if (!raw) return;
       const data = JSON.parse(raw) as Partial<SaveState>;
+      const upgraded = this.migrate(data);
       const base = this.default();
-      this.state = Object.assign(base, data) as SaveState;
-      this.state.up = Object.assign(base.up, data.up || {});
-      this.state.zones = Object.assign(base.zones, data.zones || {});
-      this.state.contracts = Object.assign(base.contracts, data.contracts || {});
-      this.state.ach = Object.assign(base.ach, data.ach || {});
-      this.state.stats = Object.assign(base.stats, data.stats || {});
+      this.state = Object.assign(base, upgraded) as SaveState;
+      this.state.up = Object.assign(base.up, upgraded.up || {});
+      this.state.zones = Object.assign(base.zones, upgraded.zones || {});
+      this.state.contracts = Object.assign(base.contracts, upgraded.contracts || {});
+      this.state.ach = Object.assign(base.ach, upgraded.ach || {});
+      this.state.stats = Object.assign(base.stats, upgraded.stats || {});
+      this.state.settings = Object.assign(base.settings, upgraded.settings || {});
       if (this.state.marketDay !== marketSeed()) {
         this.state.market = makeMarket();
         this.state.marketDay = marketSeed();
       }
-      const away = clamp((Date.now() - (data.lastSave || Date.now())) / 1000, 0, 8 * 3600);
+      const away = clamp((Date.now() - (upgraded.lastSave || Date.now())) / 1000, 0, 8 * 3600);
       if (away > 30) {
         const earn = this.offlineRate() * away;
         this.state.cash += earn;
@@ -222,14 +416,42 @@ export class Game {
         this.stats('cashEarned', earn);
         setTimeout(() => this.toast('Offline factory earned ' + money(earn) + '.'), 500);
       }
+      // After a successful legacy-key import, write the new key and clear v1.
+      if (migratedFromLegacy) {
+        this.save();
+        storage.del(SAVE_KEY_LEGACY_V1);
+        setTimeout(() => this.toast('Save upgraded to v2.'), 1100);
+      }
     } catch (e) {
       console.warn('save load failed', e);
       this.state = this.default();
+      setTimeout(() => this.toast('Save was corrupt — started fresh. Use Export to back up.'), 800);
     }
+  }
+
+  /**
+   * Migration ladder. Each `if` block upgrades the save shape forward by one
+   * version. Old keys are tolerated; missing fields are filled from
+   * defaultSettings()/etc. on the way back through Object.assign in load().
+   *
+   * Always returns a v2-shaped object, even when the input was v1-shaped.
+   */
+  migrate(data: any): Partial<SaveState> {
+    if (!data || typeof data !== 'object') return {};
+    const v = typeof data.version === 'number' ? data.version : 1;
+    // v1 -> v2: add settings, tutorialDone, version.
+    if (v < 2) {
+      data.version = 2;
+      data.settings = Object.assign(this.defaultSettings(), data.settings || {});
+      data.tutorialDone = !!data.tutorialDone;
+    }
+    // future: if (v < 3) { ... }
+    return data as Partial<SaveState>;
   }
 
   save(): void {
     this.state.lastSave = Date.now();
+    this.state.version = SAVE_VERSION;
     try {
       storage.set(SAVE_KEY, JSON.stringify(this.state));
     } catch (_e) {
@@ -242,7 +464,7 @@ export class Game {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'neon-scrapline-save.json';
+    a.download = 'scrapline-save.json';
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -256,7 +478,8 @@ export class Game {
     const r = new FileReader();
     r.onload = (ev) => {
       try {
-        const imported = JSON.parse(ev.target!.result as string) as Partial<SaveState>;
+        const parsed = JSON.parse(ev.target!.result as string);
+        const imported = this.migrate(parsed);
         const base = this.default();
         this.state = Object.assign(base, imported) as SaveState;
         this.state.up = Object.assign(base.up, imported.up || {});
@@ -264,7 +487,9 @@ export class Game {
         this.state.contracts = Object.assign(base.contracts, imported.contracts || {});
         this.state.ach = Object.assign(base.ach, imported.ach || {});
         this.state.stats = Object.assign(base.stats, imported.stats || {});
+        this.state.settings = Object.assign(base.settings, imported.settings || {});
         this.applyDrones();
+        this.applySettings();
         this.save();
         this.updateUI(true);
         this.toast('Save imported.');
@@ -302,6 +527,7 @@ export class Game {
     this.state.frenzyTime = Math.max(this.state.frenzyTime, d);
     this.stats('frenzies', 1);
     this.audio.surge();
+    Haptics.frenzy();
     this.camera.shake = 22;
     for (const n of this.nodes)
       if (this.state.zones[n.zone.id])
@@ -433,6 +659,7 @@ export class Game {
       this.particles.burst(this.player.x, this.player.y, '#ffd45c', 42, 320, 24);
       this.camera.shake = 16;
       this.audio.buy();
+      Haptics.levelUp();
     }
   }
 
@@ -456,6 +683,7 @@ export class Game {
     if (this.state.cash < cost) {
       this.toast('Need ' + money(cost));
       this.audio.err();
+      Haptics.err();
       return;
     }
     this.state.cash -= cost;
@@ -463,6 +691,7 @@ export class Game {
     this.stats('upgradesBought', 1);
     this.applyDrones();
     this.audio.buy();
+    Haptics.buy();
     this.camera.shake = 8;
     this.particles.burst(this.player.x, this.player.y, '#38f8ff', 20, 180, 18);
     this.updateUI(true);
@@ -474,6 +703,7 @@ export class Game {
     if (this.state.cash < z.cost) {
       this.toast(z.name + ' costs ' + money(z.cost));
       this.audio.err();
+      Haptics.err();
       return;
     }
     this.state.cash -= z.cost;
@@ -485,6 +715,7 @@ export class Game {
     this.status('New zone online: ' + z.name + '.', 4);
     this.camera.shake = 22;
     this.audio.surge();
+    Haptics.zoneUnlock();
     if (n) this.particles.burst(n.x, n.y, z.color, 70, 380, 26);
     this.ad.mid('Zone unlocked.');
     this.updateUI(true);
@@ -520,6 +751,7 @@ export class Game {
     for (let i = 0; i < 70; i++) this.nodes[0].update(1, this);
     this.toast('Prestige complete. Permanent value bonus increased.');
     this.audio.surge();
+    Haptics.prestige();
     this.camera.shake = 24;
     this.save();
     this.updateUI(true);
@@ -537,6 +769,7 @@ export class Game {
     this.xp += c.reward * 0.12;
     this.toast('Contract complete: ' + money(c.reward));
     this.audio.buy();
+    Haptics.buy();
     this.updateUI(true);
   }
 
@@ -550,6 +783,7 @@ export class Game {
     this.xp += a.reward * 0.1;
     this.toast('Achievement claimed: ' + a.title);
     this.audio.buy();
+    Haptics.buy();
     this.updateUI(true);
   }
 
@@ -564,6 +798,7 @@ export class Game {
     this.xp += m.reward * 0.08;
     this.toast('Market shipment paid ' + money(m.reward));
     this.audio.buy();
+    Haptics.buy();
     this.updateUI(true);
   }
 
@@ -590,17 +825,94 @@ export class Game {
     ui.factory.textContent = money(this.offlineRate()) + '/s';
     ui.level.textContent = String(this.state.level);
     ui.prestige.textContent = String(this.state.prestige);
+    // Profile pill (mobile) mirrors Level/Prestige since the dedicated chips
+    // are hidden on small screens.
+    ui.profileLevel.textContent = String(this.state.level);
+    ui.profilePrestige.textContent = String(this.state.prestige);
     ui.edge.classList.toggle('on', this.isFrenzy());
-    ui.rewardValue.disabled = this.state.boostTime > 0 || this.ad.busy;
-    ui.rewardValue.textContent =
+
+    // Reward buttons exist twice: in the desktop bottom row and inside the
+    // mobile Boosts sheet. Keep the labels + disabled state synced.
+    const boostTxt =
       this.state.boostTime > 0 ? '2× Value: ' + Math.ceil(this.state.boostTime) + 's' : 'Reward: 2× Value';
-    ui.rewardFrenzy.disabled = this.isFrenzy() || this.ad.busy;
-    ui.rewardFrenzy.textContent = this.isFrenzy() ? 'Frenzy: ' + Math.ceil(this.state.frenzyTime) + 's' : 'Reward: Frenzy';
+    const frenzyTxt =
+      this.isFrenzy() ? 'Frenzy: ' + Math.ceil(this.state.frenzyTime) + 's' : 'Reward: Frenzy';
+    const boostDisabled = this.state.boostTime > 0 || this.ad.busy;
+    const frenzyDisabled = this.isFrenzy() || this.ad.busy;
+    ui.rewardValue.disabled = boostDisabled;
+    ui.rewardValue.textContent = boostTxt;
+    ui.rewardFrenzy.disabled = frenzyDisabled;
+    ui.rewardFrenzy.textContent = frenzyTxt;
+    // Sheet variants keep their richer "head + sub" layout, so we only swap
+    // the head text and disabled state.
+    const headEl = (b: HTMLButtonElement) => b.querySelector<HTMLElement>('.boostHead');
+    const sheetValueHead = headEl(ui.rewardValueSheet);
+    if (sheetValueHead) sheetValueHead.textContent = boostTxt.replace(/^Reward: /, 'Reward Ad · ');
+    const sheetFrenzyHead = headEl(ui.rewardFrenzySheet);
+    if (sheetFrenzyHead) sheetFrenzyHead.textContent = frenzyTxt.replace(/^Reward: /, 'Reward Ad · ');
+    ui.rewardValueSheet.disabled = boostDisabled;
+    ui.rewardFrenzySheet.disabled = frenzyDisabled;
+
     ui.shopHint.textContent = this.nearShop ? 'active' : 'stand near ↑';
+    // Keep settings toggles in sync — the user may flip Sound via the desktop
+    // button while the Menu sheet is visible.
+    const syncToggle = (btn: HTMLButtonElement, val: boolean): void => {
+      const cur = btn.dataset.on === 'true';
+      if (cur !== val) {
+        btn.dataset.on = val ? 'true' : 'false';
+        btn.setAttribute('aria-pressed', val ? 'true' : 'false');
+        btn.textContent = val ? 'On' : 'Off';
+      }
+    };
+    syncToggle(ui.settingSound, this.state.settings.sound);
+    syncToggle(ui.settingMusic, this.state.settings.music);
+    syncToggle(ui.settingHaptics, this.state.settings.haptics);
+    this.updateBadges();
     if (full) {
       this.buildProgress();
       this.buildShop();
     }
+  }
+
+  /**
+   * Light up the red dot on a bottom-nav tab whenever it has a claimable
+   * reward (Goals) or an affordable upgrade/zone (Shop). The dot is the
+   * single highest-leverage "come back tomorrow" pattern in the genre, so
+   * we recompute it every UI tick.
+   */
+  updateBadges(): void {
+    // Goals: any unclaimed contract / market / achievement that's ready.
+    let goalsReady = false;
+    for (const c of CONTRACTS) {
+      if (!this.state.contracts[c.id] && this.prog(c.type) >= c.target) { goalsReady = true; break; }
+    }
+    if (!goalsReady) {
+      for (const m of this.state.market) {
+        if (!m.claimed && this.prog(m.type + 'Sold') - m.start >= m.target) { goalsReady = true; break; }
+      }
+    }
+    if (!goalsReady) {
+      for (const a of ACH) {
+        if (!this.state.ach[a.id] && this.prog(a.type) >= a.target) { goalsReady = true; break; }
+      }
+    }
+    ui.navDotGoals.hidden = !goalsReady;
+
+    // Shop: any affordable upgrade or zone unlock, or prestige ready.
+    let shopReady = false;
+    for (const u of UPGRADES) {
+      const lvl = this.up(u.id);
+      if (lvl >= u.max) continue;
+      const cost = Math.floor(u.base * Math.pow(u.factor, lvl));
+      if (this.state.cash >= cost) { shopReady = true; break; }
+    }
+    if (!shopReady) {
+      for (const z of ZONES) {
+        if (!this.state.zones[z.id] && this.state.cash >= z.cost) { shopReady = true; break; }
+      }
+    }
+    if (!shopReady && this.prestigeGain() > 0) shopReady = true;
+    ui.navDotShop.hidden = !shopReady;
   }
 
   buildProgress(): void {
@@ -870,7 +1182,7 @@ export const game = new Game();
 
 // Expose for debugging in the browser console without polluting globals at
 // module evaluation. Avoids name collisions with the rest of the page.
-(window as unknown as { NeonScraplineFactoryFrenzy?: Game }).NeonScraplineFactoryFrenzy = game;
+(window as unknown as { Scrapline?: Game }).Scrapline = game;
 
 // Keep `canvas` referenced so tree-shaking can't strip the side-effecting
 // resize listener registration.

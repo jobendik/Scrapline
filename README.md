@@ -2,12 +2,8 @@
 
 Neon cyberpunk idle-tycoon prototype targeting CrazyGames. The original was a
 single 60 KB HTML file; this branch ports it to a Vite + TypeScript project
-with a proper module split so we can extend it without choking on a wall of
-minified JS.
-
-> Working title in the running game is still **"Neon Scrapline: Factory
-> Frenzy"** — the rename to plain "Scrapline" is intentionally deferred to a
-> later content pass so this branch stays a pure structural refactor.
+with a proper module split, adds a mobile-first HUD with bottom navigation,
+versions the save schema (with migration), and ships a settings panel.
 
 ## Quick start
 
@@ -27,13 +23,13 @@ Node 20+ is required (Vite 5 / TypeScript 5.6).
 .
 ├── index.html              # Vite entry — shell HTML, mounts /src/main.ts
 ├── src/
-│   ├── main.ts             # Boots CrazyGames SDK + Game singleton
-│   ├── style.css           # All styles (extracted from the original <style>)
+│   ├── main.ts             # Boots CrazyGames SDK + Game singleton, drives load screen
+│   ├── style.css           # All styles
 │   ├── canvas.ts           # Canvas + ctx + DPR-aware resize
-│   ├── dom.ts              # HUD element references (the `ui` object)
-│   ├── constants.ts        # SAVE_KEY, TAU, DPR cap
-│   ├── types.ts            # Shared TypeScript interfaces
-│   ├── game.ts             # Game singleton (loop, save, UI, render orchestration)
+│   ├── dom.ts              # HUD element references + NAV_SHEETS map
+│   ├── constants.ts        # SAVE_KEY (v2), SAVE_KEY_LEGACY_V1, SAVE_VERSION, isMobile()
+│   ├── types.ts            # Shared TS interfaces (SaveState, SettingsState, ZoneDef, …)
+│   ├── game.ts             # Game singleton (loop, save+migrate, UI, sheets, settings)
 │   ├── utils/
 │   │   ├── math.ts         # clamp / lerp / rand / pick / len / d2 / dist
 │   │   ├── format.ts       # money / units / rr / hexA / wait
@@ -44,63 +40,102 @@ Node 20+ is required (Vite 5 / TypeScript 5.6).
 │   │   ├── camera.ts       # Smoothed follow + screen shake
 │   │   ├── particles.ts    # Particle + Particles
 │   │   ├── text-pop.ts     # Floating +$ / level-up text
+│   │   ├── haptics.ts      # navigator.vibrate wrapper with toggle
 │   │   └── ad-bridge.ts    # CrazyGames v3 ad wrapper
-│   ├── data/
-│   │   ├── items.ts        # ITEM catalogue (raw + product pairs)
-│   │   ├── zones.ts        # ZONES (Starter Yard → Singularity Foundry)
-│   │   ├── upgrades.ts     # UPGRADES (Flux Boots → Frenzy Capacitor)
-│   │   ├── contracts.ts    # CONTRACTS (one-shot rewards)
-│   │   ├── achievements.ts # ACH (permanent badges)
-│   │   └── market.ts       # Deterministic daily market generator
-│   ├── render/
-│   │   ├── draw-item.ts    # Shape-switch icon renderer
-│   │   ├── draw-zone.ts    # Pulsing aura under buildings/nodes
-│   │   ├── label.ts        # Pill label above buildings
-│   │   └── progress-circle.ts
-│   └── entities/
-│       ├── ground-item.ts
-│       ├── flying-item.ts
-│       ├── resource-node.ts
-│       ├── core.ts         # The Neon Core (forge)
-│       ├── sell-hub.ts
-│       ├── terminal.ts     # The Upgrade Terminal
-│       ├── drone.ts
-│       └── player.ts
-├── public/                 # Static assets copied as-is into dist/
+│   ├── data/               # items / zones / upgrades / contracts / achievements / market
+│   ├── render/             # drawItem / drawZone / label / progressCircle
+│   └── entities/           # ground-item / flying-item / resource-node / core /
+│                           # sell-hub / terminal / drone / player
+├── public/
 ├── vite.config.ts
 ├── tsconfig.json
 ├── package.json
-└── .github/workflows/deploy.yml  # GitHub Pages build + deploy
+└── .github/workflows/deploy.yml
 ```
+
+## Pass 1 (mobile + save v2 + settings)
+
+### Mobile HUD
+- 5-tab bottom navigation (Home / Goals / Shop / Boosts / Menu) with red-dot
+  badges on tabs that have claimable rewards. Tabs toggle full-screen sheets;
+  re-tapping a tab closes it; Home tab clears everything.
+- Side panels on desktop morph into bottom-up sheets on mobile via CSS — one
+  DOM tree, no duplicated content nodes.
+- Profile pill top-right shows Level + Prestige on mobile (the dedicated
+  chips hide < 1041px). Pill is also a Menu shortcut.
+- Safe-area insets honored on every absolute-positioned UI element.
+- Minimum 56×56 px touch targets on the bnav; 38 px elsewhere.
+- Joystick remains semi-transparent (35 %) when idle on mobile so it never
+  disappears between drag gestures.
+- Branded load screen runs while the CrazyGames SDK boots; fades out once
+  `game.init()` returns.
+
+### Settings panel
+Lives inside the Menu sheet:
+- **Sound** — wraps `AudioSys.toggle()`. Desktop Sound button stays in sync.
+- **Music** — flag is persisted; the music track itself lands in Pass 5.
+- **Haptics** — wraps `navigator.vibrate` via `core/haptics.ts`. Defaults
+  ON on mobile, OFF on desktop, persisted thereafter.
+- **Graphics** — auto / high / medium / low. Currently advisory; particle
+  caps + parallax intensity will branch off this in Pass 7.
+- **Save / Export / Import / Reset** — duplicated from the desktop bottom
+  row so mobile users never have to leave the menu sheet.
+- **Credits** — Scrapline · made by Jo Bendik.
+
+### Haptic feedback
+Wired into pickup-adjacent events: `buy`, `err`, `levelUp`, `zoneUnlock`,
+`prestige`, `frenzy`. Silently no-ops when the API is missing or settings
+have it muted.
+
+### Save v2 + migration
+- Active key: `scrapline.v2.save`. New fields: `version`, `settings`,
+  `tutorialDone`.
+- `Game.migrate()` is a forward-only ladder. v1 → v2 adds the new fields
+  with sensible defaults (haptics defaults to ON on mobile, gfx to auto).
+- On first load with no v2 save, `Game.load()` falls back to the legacy
+  key `neon_scrapline_factory_frenzy_v1`, migrates it in-memory, writes to
+  the v2 key, deletes the legacy key, and toasts "Save upgraded to v2.".
+- Corrupt save → fresh state + toast "Save was corrupt — started fresh.
+  Use Export to back up." Nothing is silently lost.
+- Reset clears both v2 and legacy keys defensively.
+
+### Other Pass 1 changes
+- All player-facing copy renamed from "Neon Scrapline" / "Factory Frenzy"
+  to **Scrapline**. The mobile title bar is hidden in favour of the bottom
+  nav; the desktop title chip simply reads "Scrapline · Neon idle tycoon".
+- Window global renamed: `window.NeonScraplineFactoryFrenzy` →
+  `window.Scrapline`.
+- Save export filename is now `scrapline-save.json` (was
+  `neon-scrapline-save.json`).
+- Notification badges on Goals + Shop tabs recompute every UI tick
+  (~150 ms). Goals dot lights when *any* contract / market / achievement is
+  ready to claim; Shop dot lights when *any* upgrade or zone is affordable
+  or when prestige is available.
 
 ## Adding content
 
-- **New item pair**: append a raw + product to [`src/data/items.ts`](src/data/items.ts).
-- **New zone**: append a `ZoneDef` to [`src/data/zones.ts`](src/data/zones.ts) (refers to the raw item id).
-- **New upgrade**: append to [`src/data/upgrades.ts`](src/data/upgrades.ts); the shop UI auto-renders the row.
-- **New contract / achievement**: append to [`src/data/contracts.ts`](src/data/contracts.ts) or
-  [`src/data/achievements.ts`](src/data/achievements.ts). `type` references a key
-  in `SaveState.stats`.
-- **Daily market reshuffle**: see [`src/data/market.ts`](src/data/market.ts) —
-  the seed is the UTC date so every player gets the same orders for the same day.
-
-## Save schema
-
-Versioned under the legacy key `neon_scrapline_factory_frenzy_v1` (preserved
-so anyone running an earlier build keeps their save). The shape is documented
-in [`src/types.ts`](src/types.ts) as `SaveState`. `Game.load()` is
-forward-defensive: unknown keys are kept, missing keys fall back to defaults
-from `Game.default()`.
+- **New item pair**: append to [`src/data/items.ts`](src/data/items.ts).
+- **New zone**: append to [`src/data/zones.ts`](src/data/zones.ts).
+- **New upgrade**: append to [`src/data/upgrades.ts`](src/data/upgrades.ts);
+  the shop UI auto-renders the row.
+- **New contract / achievement**: append to
+  [`src/data/contracts.ts`](src/data/contracts.ts) /
+  [`src/data/achievements.ts`](src/data/achievements.ts).
+- **New save field**: extend `SaveState` in
+  [`src/types.ts`](src/types.ts), bump `SAVE_VERSION` in
+  [`src/constants.ts`](src/constants.ts), and add a `if (v < N) { … }`
+  branch to `Game.migrate`.
 
 ## CrazyGames SDK touchpoints
 
-The SDK script is lazy-loaded in [`src/main.ts`](src/main.ts); failures are
-silently ignored. Calls live in [`src/core/ad-bridge.ts`](src/core/ad-bridge.ts):
+Lazy-loaded with a 2.5 s timeout in [`src/main.ts`](src/main.ts); failures
+silently fall through. Calls live in
+[`src/core/ad-bridge.ts`](src/core/ad-bridge.ts):
 
 - `sdk.game.gameplayStart()` / `gameplayStop()` wrap every ad break.
 - `sdk.ad.requestAd('rewarded' | 'midgame')` is the only ad surface.
-- When the SDK is absent the wrapper grants the reward locally and shows a
-  toast — so the game stays usable in dev and on direct GitHub Pages embeds.
+- Without the SDK the wrapper grants rewards locally and toasts an
+  apologetic notice — game stays playable in dev / on direct GH Pages.
 
 ## GitHub Pages deployment
 
@@ -109,33 +144,25 @@ builds on every push to `main` and publishes `dist/` via GitHub Pages.
 
 To enable it the first time:
 
-1. Push this branch to `main` (or merge the PR).
-2. In the repo settings → **Pages**, set **Source** to **GitHub Actions**.
-3. The action will run automatically; the deployed URL appears in the
-   workflow summary (typically `https://<user>.github.io/Scrapline/`).
+1. Merge this PR (or push directly) to `main`.
+2. Settings → **Pages** → set **Source** to **GitHub Actions**.
+3. The action runs automatically; deployed URL appears in the workflow
+   summary (typically `https://<user>.github.io/Scrapline/`).
 
-The build picks the correct asset base path from the repo name via
-`GITHUB_PAGES_BASE`. To build for a different sub-path locally:
+To preview a different sub-path locally:
 
 ```bash
 GITHUB_PAGES_BASE=/MyForkName/ npm run build
 ```
 
-## Notes on the port
+## TypeScript config
 
-- The original prototype was ~60 KB of single-line, comma-chained minified JS
-  inside one `<script>`. The split here is byte-for-byte semantically
-  identical — only formatting, indentation, type annotations and module
-  boundaries changed.
-- TypeScript is intentionally permissive (`strict: false`,
-  `noImplicitAny: false`). Tightening it up is a planned later pass — there is
-  no point fighting the type system before the upcoming content / mobile-HUD
-  overhaul lands.
-- Classes that used to read `Game.up('speed')` / `Game.isFrenzy()` as
-  static-like calls (Player, Core, Drone) now take an explicit `game`
-  reference via a small `bind(game)` method to break the import cycle
-  cleanly.
+`tsconfig.json` is intentionally permissive (`strict: false`,
+`noImplicitAny: false`) so the original prototype's dynamic patterns
+(stat key string indexing, etc.) compile without a sweeping rewrite.
+Tightening it is on the roadmap once the content passes settle.
 
 ## License
 
 Private / unreleased.
+

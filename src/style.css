@@ -1,8 +1,15 @@
 /* ============================================================================
- * Scrapline — global styles
- * Extracted verbatim from the original single-file prototype.
- * Neon cyberpunk palette driven by CSS custom properties on :root so we can
- * later swap themes by overriding these variables.
+ * Scrapline — global styles.
+ *
+ * Architecture:
+ *   - Desktop (>1040px): left/right side panels are always-visible glass
+ *     panels alongside the canvas. The bottom action row sits inline.
+ *   - Mobile (≤1040px): side panels and sheets collapse into slide-up
+ *     overlays driven by a 5-tab bottom navigation. Action row hides; its
+ *     buttons live inside the Menu and Boosts sheets instead.
+ *
+ * Single DOM tree drives both layouts — what flips between them is just
+ * positioning and visibility. No duplicated content nodes.
  * ========================================================================== */
 
 :root {
@@ -21,6 +28,15 @@
   --violet: #a476ff;
   --blue: #54a2ff;
   --shadow: 0 0 22px rgba(56, 248, 255, .24);
+
+  /* Safe-area insets — keep absolute-positioned UI clear of notches. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+
+  /* Mobile bottom nav height. Used by the canvas + sheets to leave room. */
+  --bnav-h: 64px;
 }
 
 * {
@@ -38,6 +54,7 @@ html, body {
   background: radial-gradient(circle at 50% 20%, #14285b 0%, #071227 38%, #02050c 100%);
   color: var(--text);
   font-family: Inter, "Segoe UI", Arial, sans-serif;
+  overscroll-behavior: none;
 }
 
 #shell {
@@ -60,9 +77,13 @@ canvas:active { cursor: grabbing; }
 
 .hud { position: absolute; inset: 0; pointer-events: none; }
 
+/* ---------------------------------------------------------------- top bar */
+
 .topbar {
   position: absolute;
-  left: 12px; right: 12px; top: 10px;
+  left: calc(12px + var(--safe-left));
+  right: calc(12px + var(--safe-right));
+  top: calc(10px + var(--safe-top));
   display: flex; gap: 8px; align-items: center;
   pointer-events: none; z-index: 5; flex-wrap: wrap;
 }
@@ -82,8 +103,28 @@ canvas:active { cursor: grabbing; }
   text-shadow: 0 0 10px rgba(69, 255, 147, .28); white-space: nowrap;
 }
 
+/* Profile pill (top-right). Hidden on desktop where chips show Level/Prestige. */
+.profilePill {
+  position: absolute;
+  top: calc(10px + var(--safe-top));
+  right: calc(12px + var(--safe-right));
+  display: none;
+  flex-direction: column; align-items: flex-end; gap: 1px;
+  padding: 8px 12px; border-radius: 14px; border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(33, 13, 55, .78), rgba(3, 8, 19, .73));
+  color: var(--text); font-family: inherit; font-weight: 950;
+  pointer-events: auto; z-index: 6;
+  box-shadow: 0 0 18px rgba(164, 118, 255, .22);
+}
+.profilePill .profileLine { font-size: 13px; line-height: 14px; display: flex; gap: 4px; }
+.profilePill .profileK {
+  font-size: 9px; letter-spacing: .14em; color: var(--muted); align-self: center;
+}
+
 .title {
-  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  position: absolute;
+  top: calc(10px + var(--safe-top));
+  left: 50%; transform: translateX(-50%);
   min-width: 330px; height: 54px; padding: 8px 18px; border-radius: 18px;
   text-align: center; border: 1px solid rgba(255, 67, 223, .28);
   background: linear-gradient(180deg, rgba(33, 13, 55, .78), rgba(3, 8, 19, .73));
@@ -92,26 +133,34 @@ canvas:active { cursor: grabbing; }
 .title h1 { margin: 0; font-size: 18px; letter-spacing: .15em; text-transform: uppercase; }
 .title p { margin: 2px 0 0; font-size: 11px; color: var(--muted); }
 
+/* ----------------------------------------------------------- side panels */
+
 .panel {
   position: absolute; top: 78px; width: 330px;
   max-height: calc(100vh - 164px); padding: 12px;
   border: 1px solid var(--line); border-radius: 22px;
-  background: linear-gradient(180deg, rgba(8, 22, 48, .88), rgba(3, 8, 19, .76));
+  background: linear-gradient(180deg, rgba(8, 22, 48, .92), rgba(3, 8, 19, .80));
   box-shadow: var(--shadow); backdrop-filter: blur(14px);
   pointer-events: auto; z-index: 5; overflow: hidden;
+  display: flex; flex-direction: column;
 }
-.left { left: 12px; }
-.right { right: 12px; }
+.left { left: calc(12px + var(--safe-left)); }
+.right { right: calc(12px + var(--safe-right)); }
 .panel h2 {
   margin: 0 0 9px; font-size: 13px; letter-spacing: .16em;
   text-transform: uppercase; color: #c9fbff;
   display: flex; justify-content: space-between; align-items: center;
 }
-.panel h2 span { color: var(--muted); font-size: 10px; font-weight: 700; }
+.panel h2 span, .muted { color: var(--muted); font-size: 10px; font-weight: 700; }
+
+/* Sheets that don't exist as desktop panels — Boosts and Menu. They live as
+   slide-up overlays on mobile only. Hidden completely on desktop. */
+.sheet { display: none; }
 
 .scroll {
-  max-height: calc(100vh - 228px);
+  flex: 1 1 auto;
   overflow-y: auto; padding-right: 4px;
+  -webkit-overflow-scrolling: touch;
 }
 .scroll::-webkit-scrollbar { width: 6px; }
 .scroll::-webkit-scrollbar-track { background: rgba(255, 255, 255, .04); border-radius: 999px; }
@@ -142,10 +191,11 @@ canvas:active { cursor: grabbing; }
 
 .tabs { display: flex; gap: 6px; margin-bottom: 8px; }
 .tab {
-  flex: 1; padding: 7px 6px; border-radius: 12px;
+  flex: 1; padding: 9px 6px; border-radius: 12px;
   background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .09);
-  font-size: 10px; font-weight: 900; color: var(--muted);
+  font-size: 11px; font-weight: 900; color: var(--muted);
   cursor: pointer; text-align: center;
+  min-height: 36px;
 }
 .tab.active {
   color: #04101a;
@@ -153,18 +203,27 @@ canvas:active { cursor: grabbing; }
   border-color: transparent;
 }
 
+/* ----------------------------------------------------------------- buttons */
+
 button {
   border: 1px solid rgba(56, 248, 255, .28);
   background: linear-gradient(180deg, rgba(32, 91, 132, .94), rgba(7, 28, 52, .94));
-  color: var(--text); border-radius: 12px; padding: 8px 10px;
+  color: var(--text); border-radius: 12px; padding: 8px 12px;
   font-size: 12px; font-weight: 950; letter-spacing: .03em; cursor: pointer;
   box-shadow: 0 0 12px rgba(56, 248, 255, .14);
   transition: transform .08s ease, filter .12s ease, border-color .12s ease;
   white-space: nowrap;
+  min-height: 38px;
 }
 button:hover { filter: brightness(1.12); border-color: rgba(69, 255, 147, .44); }
 button:active { transform: scale(.97); }
 button:disabled { opacity: .42; cursor: not-allowed; filter: grayscale(.65); }
+button:focus-visible,
+.tab:focus-visible,
+.themeBtn:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
 button.good {
   background: linear-gradient(180deg, rgba(43, 145, 87, .94), rgba(7, 58, 37, .94));
   border-color: rgba(69, 255, 147, .4);
@@ -182,8 +241,18 @@ button.danger {
   border-color: rgba(255, 79, 115, .5);
 }
 
-.bottom {
-  position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
+/* Sheet close button shown on mobile only (in the corner of each sheet). */
+.sheetClose {
+  display: none;
+  position: absolute; top: 8px; right: 10px;
+  padding: 8px 14px; font-size: 11px;
+}
+
+/* Desktop bottom action row. */
+.bottom.desktopBottom {
+  position: absolute;
+  left: 50%; bottom: calc(10px + var(--safe-bottom));
+  transform: translateX(-50%);
   width: min(940px, calc(100vw - 24px)); padding: 10px;
   border: 1px solid var(--line); border-radius: 22px;
   background: linear-gradient(180deg, rgba(8, 22, 48, .82), rgba(3, 8, 19, .74));
@@ -192,8 +261,53 @@ button.danger {
   justify-content: center; flex-wrap: wrap; z-index: 7;
 }
 
+/* ---------------------------------------------------- mobile bottom nav */
+
+.bnav {
+  display: none;
+  position: absolute;
+  left: 0; right: 0;
+  bottom: 0;
+  z-index: 11;
+  padding: 8px 8px calc(8px + var(--safe-bottom));
+  gap: 6px;
+  background: linear-gradient(180deg, rgba(4, 11, 26, .72), rgba(2, 6, 14, .96));
+  border-top: 1px solid var(--line);
+  backdrop-filter: blur(14px);
+  pointer-events: auto;
+}
+.bnav .nbtn {
+  flex: 1;
+  min-height: 56px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px;
+  padding: 6px 2px; border-radius: 14px;
+  background: rgba(255, 255, 255, .03);
+  border: 1px solid rgba(255, 255, 255, .06);
+  color: var(--muted);
+  font-size: 10px; font-weight: 900; letter-spacing: .06em;
+  position: relative;
+  box-shadow: none;
+}
+.bnav .nbtn .nicon { font-size: 22px; line-height: 22px; color: var(--cyan); }
+.bnav .nbtn.active {
+  color: var(--text);
+  border-color: var(--line);
+  background: linear-gradient(180deg, rgba(32, 91, 132, .55), rgba(7, 28, 52, .65));
+  box-shadow: 0 0 14px rgba(56, 248, 255, .25);
+}
+.bnav .nbtn .dot {
+  position: absolute; top: 6px; right: 10px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--pink); box-shadow: 0 0 8px var(--pink);
+}
+
+/* --------------------------------------------------------- status + toast */
+
 .status {
-  position: absolute; left: 50%; top: 72px; transform: translateX(-50%);
+  position: absolute;
+  left: 50%; top: calc(72px + var(--safe-top));
+  transform: translateX(-50%);
   min-width: 360px; max-width: min(760px, calc(100vw - 24px));
   text-align: center; padding: 8px 14px; border-radius: 999px;
   border: 1px solid rgba(69, 255, 147, .23); background: rgba(4, 13, 28, .66);
@@ -202,7 +316,9 @@ button.danger {
 }
 
 .toast {
-  position: absolute; left: 50%; bottom: 112px; transform: translateX(-50%);
+  position: absolute; left: 50%;
+  bottom: calc(112px + var(--safe-bottom));
+  transform: translateX(-50%);
   min-width: 280px; max-width: min(720px, calc(100vw - 28px));
   padding: 12px 16px; text-align: center;
   border: 1px solid rgba(56, 248, 255, .32); border-radius: 17px;
@@ -223,11 +339,14 @@ button.danger {
   to   { filter: brightness(1.35); }
 }
 
+/* ------------------------------------------------------------------ modal */
+
 .modal {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
   background: radial-gradient(circle, rgba(8, 22, 49, .58), rgba(0, 0, 0, .84));
   pointer-events: auto; z-index: 20;
+  padding: 20px;
 }
 .card {
   width: min(760px, calc(100vw - 30px)); padding: 26px; border-radius: 30px;
@@ -268,6 +387,8 @@ button.danger {
 
 .hidden { display: none !important; }
 
+/* --------------------------------------------------------- virtual joystick */
+
 .mobilePad {
   position: absolute; width: 128px; height: 128px; border-radius: 50%;
   border: 1px solid rgba(56, 248, 255, .2); background: rgba(5, 18, 38, .28);
@@ -287,7 +408,7 @@ button.danger {
   font-size: 11px; line-height: 1.4; color: #ffe8ad;
   pointer-events: auto; z-index: 10;
 }
-.storage button { font-size: 10px; padding: 4px 8px; margin-top: 6px; }
+.storage button { font-size: 10px; padding: 4px 8px; margin-top: 6px; min-height: 28px; }
 
 .smallNote {
   font-size: 10px; color: var(--muted); line-height: 1.35;
@@ -296,27 +417,377 @@ button.danger {
 
 .fileInput { display: none; }
 
+/* -------------------------------------------------- settings panel inputs */
+
+.sheetBody { display: flex; flex-direction: column; gap: 12px; }
+
+.settingsBlock {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 12px; border-radius: 16px;
+  border: 1px solid rgba(56, 248, 255, .13); background: rgba(3, 11, 26, .55);
+}
+.settingRow {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+  padding: 8px 4px;
+}
+.settingRow + .settingRow { border-top: 1px dashed rgba(255, 255, 255, .05); }
+.settingName { font-size: 13px; font-weight: 950; color: #ecfeff; }
+.settingDesc { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+.toggle {
+  min-width: 64px; min-height: 38px;
+  background: rgba(120, 50, 80, .85);
+  border-color: rgba(255, 79, 115, .4);
+}
+.toggle[data-on="true"] {
+  background: linear-gradient(180deg, rgba(43, 145, 87, .94), rgba(7, 58, 37, .94));
+  border-color: rgba(69, 255, 147, .5);
+}
+
+.select {
+  background: rgba(11, 30, 62, .85);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-weight: 900;
+  font-size: 12px;
+  min-height: 38px;
+  appearance: none;
+}
+
+.menuActions {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+}
+.menuActions button { min-height: 44px; }
+.menuActions button:first-child { grid-column: 1 / -1; }
+
+.themePickerWrap {
+  padding: 10px 4px;
+  border-top: 1px dashed rgba(255, 255, 255, .05);
+  border-bottom: 1px dashed rgba(255, 255, 255, .05);
+}
+.themePicker {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  margin-top: 8px;
+}
+.themeBtn {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 10px 8px; min-height: 64px;
+  border-radius: 14px; cursor: pointer; position: relative;
+  background: rgba(0, 0, 0, .24);
+  border: 1px solid rgba(255, 255, 255, .12);
+  color: var(--text); font-family: inherit;
+  font-size: 11px; font-weight: 800;
+  text-align: center;
+  gap: 4px;
+}
+.themeBtn .swatchRow {
+  display: flex; gap: 4px; margin-bottom: 4px;
+}
+.themeBtn .sw {
+  width: 10px; height: 10px; border-radius: 3px;
+  box-shadow: 0 0 4px currentColor;
+}
+.themeBtn.active {
+  border-color: var(--cyan); box-shadow: 0 0 12px rgba(56, 248, 255, .35);
+}
+.themeBtn.locked {
+  opacity: .42; cursor: not-allowed; filter: saturate(.4);
+}
+.themeBtn .req {
+  font-size: 9px; color: var(--muted); font-weight: 600;
+}
+
+.sectionHeading {
+  display: flex; justify-content: space-between; align-items: center;
+  margin: 14px 0 6px; padding-top: 8px;
+  border-top: 1px solid rgba(56, 248, 255, .18);
+  font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+  color: #c9fbff; font-weight: 950;
+}
+
+.credits {
+  margin-top: 4px;
+  font-size: 11px; color: var(--muted); text-align: center;
+  line-height: 1.5;
+}
+.credits .creditsLine { color: var(--cyan); font-weight: 700; margin-top: 2px; }
+
+/* Boost sheet buttons are tall pills with subtitle text. */
+.boostBtn {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  padding: 14px 16px; min-height: 64px;
+  white-space: normal; text-align: left;
+}
+.boostBtn .boostHead { font-size: 14px; font-weight: 950; }
+.boostBtn .boostSub { font-size: 11px; font-weight: 600; opacity: .85; }
+.boostBtn:disabled .boostSub { opacity: .6; }
+
+/* --------------------------------------------------- daily chest modal */
+
+.chestCard {
+  position: relative;
+  overflow: hidden;
+  padding: 22px 24px;
+}
+.chestEyebrow {
+  font-size: 11px; letter-spacing: .25em; text-transform: uppercase;
+  color: var(--muted);
+}
+.chestRow {
+  display: flex; align-items: center; gap: 16px;
+  margin: 14px 0 18px;
+  padding: 14px; border-radius: 18px;
+  border: 1px solid rgba(255, 212, 92, .35);
+  background: linear-gradient(135deg, rgba(60, 40, 8, .55), rgba(5, 9, 18, .65));
+}
+.chestSlot {
+  position: relative; width: 92px; height: 92px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 22px;
+  background: rgba(0, 0, 0, .25);
+  border: 1px solid rgba(255, 212, 92, .35);
+  flex-shrink: 0;
+}
+.chestSlot .chestIcon {
+  font-size: 56px; color: var(--gold); text-shadow: 0 0 22px var(--gold);
+  font-weight: 950;
+}
+.chestGlow {
+  position: absolute; inset: -4px; border-radius: 26px;
+  pointer-events: none;
+  box-shadow: 0 0 32px var(--gold);
+  animation: chestPulse 1.6s ease-in-out infinite;
+}
+@keyframes chestPulse {
+  from { filter: brightness(.85); }
+  to   { filter: brightness(1.4); }
+}
+.chestSlot[data-tier="rare"]      { border-color: rgba(56, 248, 255, .55); }
+.chestSlot[data-tier="rare"] .chestIcon { color: var(--cyan); text-shadow: 0 0 22px var(--cyan); }
+.chestSlot[data-tier="rare"] .chestGlow { box-shadow: 0 0 32px var(--cyan); }
+.chestSlot[data-tier="epic"]      { border-color: rgba(255, 67, 223, .65); }
+.chestSlot[data-tier="epic"] .chestIcon { color: var(--pink); text-shadow: 0 0 26px var(--pink); }
+.chestSlot[data-tier="epic"] .chestGlow { box-shadow: 0 0 38px var(--pink); }
+.chestSlot[data-tier="legendary"] {
+  border-color: rgba(255, 67, 223, .8);
+  background: linear-gradient(135deg, rgba(255, 67, 223, .25), rgba(255, 212, 92, .25));
+}
+.chestSlot[data-tier="legendary"] .chestIcon {
+  background: linear-gradient(135deg, var(--pink), var(--gold));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 14px var(--pink));
+}
+.chestSlot[data-tier="legendary"] .chestGlow {
+  box-shadow: 0 0 50px var(--pink), 0 0 80px var(--gold);
+}
+
+.chestPayout { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.chestLine {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 13px;
+}
+.chestVal {
+  font-weight: 950; font-size: 17px;
+  text-shadow: 0 0 8px rgba(69, 255, 147, .5);
+}
+
+.chestActions {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: 8px;
+}
+.chestActions button { min-height: 44px; }
+
+.chestStreak {
+  display: flex; gap: 4px; justify-content: center; flex-wrap: wrap;
+  margin-top: 14px;
+}
+.chestStreak .pip {
+  width: 18px; height: 18px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, .04);
+  border: 1px solid rgba(255, 255, 255, .07);
+  font-size: 9px; font-weight: 900; color: var(--muted);
+}
+.chestStreak .pip.done { background: linear-gradient(180deg, var(--cyan), var(--green)); color: #04101a; border-color: transparent; }
+.chestStreak .pip.today { background: linear-gradient(180deg, rgba(255, 212, 92, .9), rgba(204, 152, 35, .9)); color: #2a1a05; border-color: rgba(255, 212, 92, 1); animation: chestPulse 1.4s ease-in-out infinite alternate; }
+.chestStreak .pip.milestone { border-color: rgba(255, 67, 223, .65); }
+
+/* --------------------------------------------------- tutorial banner */
+
+.tutorialBanner {
+  position: absolute;
+  left: 50%; top: calc(112px + var(--safe-top));
+  transform: translateX(-50%);
+  width: min(420px, calc(100vw - 24px));
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(56, 248, 255, .5);
+  background: linear-gradient(180deg, rgba(8, 32, 60, .96), rgba(3, 9, 21, .96));
+  box-shadow: 0 0 26px rgba(56, 248, 255, .35);
+  display: flex; gap: 10px; align-items: flex-start;
+  pointer-events: auto; z-index: 15;
+  animation: tutPulse 1.8s ease-in-out infinite alternate;
+}
+@keyframes tutPulse {
+  from { box-shadow: 0 0 16px rgba(56, 248, 255, .35); }
+  to   { box-shadow: 0 0 32px rgba(56, 248, 255, .65); }
+}
+.tutorialPointer {
+  color: var(--cyan); font-size: 22px; line-height: 1; padding-top: 2px;
+  flex-shrink: 0;
+}
+.tutorialText { flex: 1; min-width: 0; }
+.tutorialHead {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 13px; font-weight: 950; color: var(--cyan);
+  letter-spacing: .08em; text-transform: uppercase;
+}
+.tutorialProgress { color: var(--muted); font-size: 10px; }
+.tutorialBody { font-size: 12px; color: var(--text); line-height: 1.4; margin-top: 4px; }
+.tutorialSkip {
+  font-size: 10px; padding: 4px 10px; min-height: 28px;
+  background: rgba(255, 255, 255, .05);
+  border: 1px solid rgba(255, 255, 255, .1);
+}
+
 @media (max-width: 1040px) {
-  .right { display: none; }
-  .left { width: 310px; }
+  .tutorialBanner { top: calc(132px + var(--safe-top)); }
+}
+
+/* Tab badge dot for the new Daily tab. */
+.tab { position: relative; }
+.tab .tabDot {
+  position: absolute; top: 4px; right: 6px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--pink); box-shadow: 0 0 6px var(--pink);
+}
+
+/* ----------------------------------------------------------- load screen */
+
+.loadScreen {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 12px;
+  background: radial-gradient(circle at 50% 35%, #14285b 0%, #071227 40%, #02050c 100%);
+  z-index: 200;
+  transition: opacity .35s ease, visibility 0s .35s linear;
+}
+.loadScreen.gone { opacity: 0; visibility: hidden; pointer-events: none; }
+.loadLogo {
+  font-size: 36px; font-weight: 950; letter-spacing: .25em;
+  background: linear-gradient(90deg, var(--cyan), var(--pink));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  text-shadow: 0 0 26px rgba(56, 248, 255, .35);
+}
+.loadTag {
+  font-size: 11px; letter-spacing: .25em; text-transform: uppercase;
+  color: var(--muted);
+}
+.loadBar {
+  width: min(280px, 60vw); height: 6px;
+  background: rgba(255, 255, 255, .08);
+  border-radius: 999px; overflow: hidden;
+  margin-top: 12px;
+}
+.loadFill {
+  height: 100%; width: 0%;
+  background: linear-gradient(90deg, var(--cyan), var(--green));
+  box-shadow: 0 0 10px var(--green);
+  transition: width .25s ease;
+}
+.loadHint { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+/* ==========================================================================
+ * Desktop / mobile switch — single source of truth at 1040px.
+ *
+ * Default rules above target desktop. The block below mutates layout for
+ * mobile: panels become slide-up sheets, bottom-nav shows, profile pill
+ * replaces the level/prestige chips.
+ * ========================================================================== */
+
+@media (min-width: 1041px) {
+  /* Desktop: profile pill hidden because chips already show Level/Prestige. */
+  .profilePill { display: none; }
+  .bnav { display: none; }
+}
+
+@media (max-width: 1040px) {
+  /* Title bar is replaced by the bottom nav identity; profile pill takes
+     over Level/Prestige slot top-right. */
   .title { display: none; }
-  .mobilePad { display: block; }
-  .status { top: 68px; }
-  .bottom { bottom: 8px; }
-  .chip { min-width: auto; height: 43px; }
+  .lvlChip { display: none; }
+  .profilePill { display: inline-flex; }
+
+  /* Show the bottom nav. */
+  .bnav { display: flex; }
+  .bottom.desktopBottom { display: none; }
+
+  /* Joystick always visible (semi-transparent until pressed). */
+  .mobilePad { display: block; opacity: .35; }
+
+  /* Status pill moves down a touch to clear the smaller chips. */
+  .status { top: calc(70px + var(--safe-top)); font-size: 11px; }
+
+  /* Smaller chip footprint. */
+  .chip { min-width: auto; height: 44px; padding: 6px 10px; }
+  .chip .label { font-size: 8.5px; }
   .chip .value { font-size: 14px; }
-  .panel { top: 118px; }
+
+  /* Side panels + sheets become slide-up overlays. */
+  .panel, .sheet {
+    display: none;
+    position: absolute;
+    left: calc(8px + var(--safe-left));
+    right: calc(8px + var(--safe-right));
+    bottom: calc(var(--bnav-h) + var(--safe-bottom) + 8px);
+    top: calc(60px + var(--safe-top));
+    width: auto;
+    max-height: none;
+    max-width: none;
+    z-index: 10;
+    padding: 16px 12px 60px;
+    border-radius: 22px;
+    flex-direction: column;
+  }
+  .panel.open, .sheet.open {
+    display: flex;
+    animation: sheetIn .22s cubic-bezier(.2, .8, .2, 1);
+  }
+  @keyframes sheetIn {
+    from { transform: translateY(18px); opacity: 0; }
+    to   { transform: translateY(0); opacity: 1; }
+  }
+  .panel h2 { font-size: 14px; }
+  .sheetClose { display: inline-flex; }
+
+  /* The scroll region inside a sheet should fill its remaining height. */
+  .panel .scroll, .sheet .scroll { max-height: none; }
+
+  /* Storage warning slides above the bottom nav. */
+  .storage { bottom: calc(var(--bnav-h) + var(--safe-bottom) + 12px); }
 }
 
 @media (max-width: 680px) {
-  .left { display: none; }
-  .topbar { left: 8px; right: 8px; gap: 5px; }
-  .chip { padding: 6px 8px; }
+  .topbar {
+    left: calc(8px + var(--safe-left));
+    right: calc(8px + var(--safe-right));
+    gap: 5px;
+  }
+  .chip { padding: 6px 8px; height: 40px; }
   .chip .label { font-size: 8px; }
   .chip .value { font-size: 12px; }
-  .status { top: 106px; min-width: 0; width: calc(100vw - 18px); font-size: 11px; }
+  .status {
+    top: calc(96px + var(--safe-top));
+    min-width: 0; width: calc(100vw - 18px);
+    font-size: 11px;
+  }
   .tips { grid-template-columns: 1fr; }
   .card h1 { font-size: 23px; }
-  .bottom { padding: 8px; }
-  .toast { bottom: 128px; }
+  .toast { bottom: calc(var(--bnav-h) + var(--safe-bottom) + 16px); }
+  .menuActions { grid-template-columns: 1fr; }
 }

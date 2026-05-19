@@ -56,10 +56,14 @@ export class Particle {
 
 export class Particles {
   a: Particle[] = [];
+  /** Soft cap. Excess particles are dropped LIFO before being appended. */
+  cap = 300;
 
   /** Radial burst — used for sells, deposits, frenzy starts, zone unlocks. */
   burst(x: number, y: number, c: string, n = 12, p = 150, g = 18): void {
-    for (let i = 0; i < n; i++) {
+    const room = Math.max(0, this.cap - this.a.length);
+    const spawn = Math.min(n, room);
+    for (let i = 0; i < spawn; i++) {
       const a = rand(0, TAU);
       const s = rand(p * 0.2, p);
       this.a.push(new Particle(x, y, Math.cos(a) * s, Math.sin(a) * s, c, rand(0.25, 0.85), rand(2, 6), g));
@@ -68,6 +72,7 @@ export class Particles {
 
   /** Light puff used by Player/Drone trails. */
   trail(x: number, y: number, c: string): void {
+    if (this.a.length >= this.cap) return;
     this.a.push(
       new Particle(
         x + rand(-8, 8),

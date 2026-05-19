@@ -32,7 +32,12 @@ export type ItemShape =
   | 'rect'
   | 'lens'
   | 'capsule'
-  | 'ring';
+  | 'ring'
+  | 'gear'
+  | 'crystal'
+  | 'prism'
+  | 'vortex'
+  | 'sigil';
 
 /** Definition for a single item type — both raw and product variants share the shape. */
 export interface ItemDef {
@@ -128,8 +133,46 @@ export interface MarketOrder {
   claimed: boolean;
 }
 
+/** Graphics quality preset chosen by the player (or 'auto'). */
+export type GfxQuality = 'auto' | 'low' | 'medium' | 'high';
+
+/** Player-facing options stored in the save. */
+export interface SettingsState {
+  /** SFX on/off. Mirrors AudioSys.on so it survives reloads. */
+  sound: boolean;
+  /** Background music on/off. (Music itself is not wired until Pass 5.) */
+  music: boolean;
+  /** Haptic feedback (vibrate API) on/off. Defaults: ON mobile, OFF desktop. */
+  haptics: boolean;
+  /** Graphics quality preset. */
+  gfx: GfxQuality;
+}
+
+/** A single daily challenge active on a given UTC day. */
+export interface DailyChallenge {
+  id: string;
+  /** Template id (see data/daily-challenges.ts). */
+  template: string;
+  /** Human-readable label rendered in the Goals → Daily tab. */
+  title: string;
+  /** Statistics key (e.g. "sold", "frenzies"). */
+  type: string;
+  /** Stat target the player must hit. */
+  target: number;
+  /** Snapshot of the stat at the moment the challenge appeared (delta tracking). */
+  start: number;
+  /** Cash reward when claimed. */
+  reward: number;
+  claimed: boolean;
+}
+
 /** Persistent save state — see {@link Game.default}. */
 export interface SaveState {
+  /**
+   * Schema version. Bumped whenever new fields are added. The Game.load
+   * migration ladder maps older saves up to the current shape.
+   */
+  version: number;
   cash: number;
   totalCash: number;
   level: number;
@@ -145,6 +188,52 @@ export interface SaveState {
   frenzyTime: number;
   lastSave: number;
   stats: Record<StatKey, number>;
+  /** v2: player-facing settings — sound, music, haptics, graphics. */
+  settings: SettingsState;
+  /** v2/v3: tutorial state. `tutorialDone` is sticky; `tutorialStep` advances. */
+  tutorialDone: boolean;
+  tutorialStep: number;
+
+  // -------------------- Pass 3 (v3) — daily retention --------------------
+
+  /**
+   * YYYY-MM-DD UTC of the most recent login the game observed. Used to
+   * decide when to extend the streak vs. reset it.
+   */
+  lastLoginUTC: string;
+  /** Current consecutive-day login streak. Resets to 1 if a day is missed. */
+  streakDays: number;
+  /** Which day of the 30-day chest cycle we're on (1-30, wraps after 30). */
+  chestDay: number;
+  /**
+   * Has the player already claimed today's chest? Cleared whenever a new
+   * UTC date is observed.
+   */
+  chestClaimedToday: boolean;
+  /**
+   * Last login chest cycle position the player did **not** claim — used so
+   * the welcome-back modal can offer it on next login. 0 = nothing pending.
+   */
+  pendingChestDay: number;
+
+  /** UTC-date seed (YYYYMMDD) used when the daily challenges were generated. */
+  dailyChallengeDay: number;
+  /** Active daily challenges (always 3). Regenerated when day rolls over. */
+  dailyChallenges: DailyChallenge[];
+  /** Has the player used their free reroll today? */
+  dailyChallengeRerolled: boolean;
+
+  // ----------------------- Pass 4 (v4) — meta layer ----------------------
+
+  /** Prestige tree node levels keyed by node id (see data/prestige-tree.ts). */
+  prestigeNodes: Record<string, number>;
+  /** Sum of PP spent across all tree nodes. availablePP = prestige - prestigeSpent. */
+  prestigeSpent: number;
+
+  /** Active theme id (matches THEMES from data/themes.ts). Defaults to 'cyan'. */
+  activeTheme: string;
+  /** Ids of themes the player has ever satisfied the unlock for. Cosmetic only. */
+  themesOwned: string[];
 }
 
 /**

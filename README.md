@@ -1,13 +1,20 @@
 # Scrapline
 
-Neon cyberpunk idle-tycoon prototype targeting CrazyGames. The original was a
-single 60 KB HTML file; this branch ports it to a Vite + TypeScript project
-with a proper module split so we can extend it without choking on a wall of
-minified JS.
+Neon cyberpunk idle-tycoon for CrazyGames. Vite + TypeScript build.
 
-> Working title in the running game is still **"Neon Scrapline: Factory
-> Frenzy"** — the rename to plain "Scrapline" is intentionally deferred to a
-> later content pass so this branch stays a pure structural refactor.
+The original was a 60 KB single-file HTML prototype; this branch ports it to
+a modular project and delivers all 7 design-spec passes:
+
+| Pass | Focus |
+| ---- | ----- |
+| 0 | Vite + TS scaffolding + GitHub Pages workflow |
+| 1 | Mobile-first HUD, save v2 + migration, settings panel, rename to Scrapline |
+| 2 | Content scale-up (10 zones, 20 items, 16 upgrades, 50 contracts, 42 achievements) |
+| 3 | Daily login chest (30-day cycle), 3 daily challenges, onboarding tutorial — save v3 |
+| 4 | Prestige tree (12 nodes, 3 tiers), drone roster (5 types), 6 unlockable themes — save v4 |
+| 5 | Procedural music (calm + Frenzy variants), layered SFX, cash counter roll-up, camera punch-zoom |
+| 6 | CrazyGames SDK refinement — happytime, midgame cooldown, getUser welcome, cloud save |
+| 7 | Performance auto-quality, `?debug=1` overlay with cheats, keyboard shortcuts, focus-visible a11y |
 
 ## Quick start
 
@@ -19,7 +26,19 @@ npm run preview    # serves the production build locally
 npm run typecheck  # tsc --noEmit
 ```
 
+Append `?debug=1` to the URL to surface the debug panel with FPS / entity
+counters + cheat buttons (+$1M, +$1B, skip day, max upgrades, prestige,
+spawn 100 items, unlock all zones, all themes).
+
 Node 20+ is required (Vite 5 / TypeScript 5.6).
+
+## Bundle
+
+Final build:
+- **98 KB JS** (30 KB gzipped)
+- **20 KB CSS** (5 KB gzipped)
+- **12 KB HTML** (3.5 KB gzipped)
+- Well under the spec's 800 KB transferred budget.
 
 ## File layout
 
@@ -27,114 +46,144 @@ Node 20+ is required (Vite 5 / TypeScript 5.6).
 .
 ├── index.html              # Vite entry — shell HTML, mounts /src/main.ts
 ├── src/
-│   ├── main.ts             # Boots CrazyGames SDK + Game singleton
-│   ├── style.css           # All styles (extracted from the original <style>)
+│   ├── main.ts             # Boots SDK + Game, drives load screen
+│   ├── style.css           # All styles (mobile-first, theme-driven)
 │   ├── canvas.ts           # Canvas + ctx + DPR-aware resize
-│   ├── dom.ts              # HUD element references (the `ui` object)
-│   ├── constants.ts        # SAVE_KEY, TAU, DPR cap
-│   ├── types.ts            # Shared TypeScript interfaces
-│   ├── game.ts             # Game singleton (loop, save, UI, render orchestration)
+│   ├── dom.ts              # HUD element references
+│   ├── constants.ts        # SAVE_KEY (v4), SAVE_VERSION, isMobile()
+│   ├── types.ts            # Shared TS interfaces
+│   ├── game.ts             # Game singleton — loop, save+migrate, UI
 │   ├── utils/
 │   │   ├── math.ts         # clamp / lerp / rand / pick / len / d2 / dist
 │   │   ├── format.ts       # money / units / rr / hexA / wait
 │   │   └── storage.ts      # safeStorage with in-memory fallback
 │   ├── core/
-│   │   ├── audio.ts        # AudioSys (procedural WebAudio SFX)
-│   │   ├── input.ts        # Keyboard + virtual joystick
-│   │   ├── camera.ts       # Smoothed follow + screen shake
-│   │   ├── particles.ts    # Particle + Particles
+│   │   ├── audio.ts        # SFX + procedural music loop
+│   │   ├── input.ts        # Keyboard + virtual joystick + nav shortcuts
+│   │   ├── camera.ts       # Smoothed follow + screen shake + punch-zoom
+│   │   ├── particles.ts    # Particle + Particles (cap-aware)
 │   │   ├── text-pop.ts     # Floating +$ / level-up text
-│   │   └── ad-bridge.ts    # CrazyGames v3 ad wrapper
+│   │   ├── haptics.ts      # navigator.vibrate wrapper
+│   │   ├── ad-bridge.ts    # CrazyGames v3 SDK (ads, happytime, cloud, user)
+│   │   ├── tutorial.ts     # 6-step onboarding state machine
+│   │   ├── daily.ts        # UTC-day check-in (streak + chest + challenges)
+│   │   ├── debug.ts        # ?debug=1 overlay + cheats
+│   │   └── perf.ts         # Auto-quality detection
 │   ├── data/
-│   │   ├── items.ts        # ITEM catalogue (raw + product pairs)
-│   │   ├── zones.ts        # ZONES (Starter Yard → Singularity Foundry)
-│   │   ├── upgrades.ts     # UPGRADES (Flux Boots → Frenzy Capacitor)
-│   │   ├── contracts.ts    # CONTRACTS (one-shot rewards)
-│   │   ├── achievements.ts # ACH (permanent badges)
-│   │   └── market.ts       # Deterministic daily market generator
-│   ├── render/
-│   │   ├── draw-item.ts    # Shape-switch icon renderer
-│   │   ├── draw-zone.ts    # Pulsing aura under buildings/nodes
-│   │   ├── label.ts        # Pill label above buildings
-│   │   └── progress-circle.ts
-│   └── entities/
-│       ├── ground-item.ts
-│       ├── flying-item.ts
-│       ├── resource-node.ts
-│       ├── core.ts         # The Neon Core (forge)
-│       ├── sell-hub.ts
-│       ├── terminal.ts     # The Upgrade Terminal
-│       ├── drone.ts
-│       └── player.ts
-├── public/                 # Static assets copied as-is into dist/
+│   │   ├── items.ts        # 20 items (10 raw, 10 product)
+│   │   ├── zones.ts        # 10 zones (Starter Yard → Heat Death Reactor)
+│   │   ├── upgrades.ts     # 16 upgrades
+│   │   ├── contracts.ts    # 50 contracts (starter / intermediate / advanced)
+│   │   ├── achievements.ts # 42 achievements
+│   │   ├── market.ts       # Daily market (deterministic per UTC day)
+│   │   ├── daily-chest.ts  # 30-day rotating chest cycle
+│   │   ├── daily-challenges.ts # Per-day challenge templates
+│   │   ├── prestige-tree.ts# 12-node skill tree (Reboot/Reset/Singularity)
+│   │   ├── drones.ts       # 5 drone types (Scout/Hauler/Processor/Trader/Elite)
+│   │   └── themes.ts       # 6 themes (Cyan/Sunset/Toxic/Void/BloodMoon/Frost)
+│   ├── render/             # drawItem / drawZone / label / progressCircle
+│   └── entities/           # ground-item / flying-item / resource-node /
+│                           # core / sell-hub / terminal / drone / player
+├── public/
 ├── vite.config.ts
 ├── tsconfig.json
 ├── package.json
-└── .github/workflows/deploy.yml  # GitHub Pages build + deploy
+└── .github/workflows/deploy.yml
 ```
 
-## Adding content
+## Retention systems
 
-- **New item pair**: append a raw + product to [`src/data/items.ts`](src/data/items.ts).
-- **New zone**: append a `ZoneDef` to [`src/data/zones.ts`](src/data/zones.ts) (refers to the raw item id).
-- **New upgrade**: append to [`src/data/upgrades.ts`](src/data/upgrades.ts); the shop UI auto-renders the row.
-- **New contract / achievement**: append to [`src/data/contracts.ts`](src/data/contracts.ts) or
-  [`src/data/achievements.ts`](src/data/achievements.ts). `type` references a key
-  in `SaveState.stats`.
-- **Daily market reshuffle**: see [`src/data/market.ts`](src/data/market.ts) —
-  the seed is the UTC date so every player gets the same orders for the same day.
+- **Daily chest** — 30-day rotating cycle. Days 7, 14, 21 are themed
+  milestones; day 30 is the legendary capstone (huge cash + 12 PP). Streak
+  resets if a day is missed. Modal pops on a new UTC day; rewarded-ad
+  doubles the payout.
+- **Daily challenges** — 3 deterministic per-day challenges scaled to
+  player level. Free reroll once per UTC day.
+- **Tutorial** — 6 hand-pointer steps that advance based on game events
+  (move, collect, deposit, sell, upgrade, complete). Skippable from the
+  banner.
+- **Notification badges** — red dots on Goals/Shop nav tabs whenever
+  something is claimable / affordable; per-tab dot on Daily within Goals.
+- **Theme unlocks** — 6 themes gated on streak / prestige / zone-count
+  milestones. Pure cosmetic; CSS-variable swap.
+- **Prestige tree** — 12 nodes across 3 tiers (Reboot 0+ PP, Reset 30+,
+  Singularity 120+). PP spent on tree nodes is preserved across resets.
 
 ## Save schema
 
-Versioned under the legacy key `neon_scrapline_factory_frenzy_v1` (preserved
-so anyone running an earlier build keeps their save). The shape is documented
-in [`src/types.ts`](src/types.ts) as `SaveState`. `Game.load()` is
-forward-defensive: unknown keys are kept, missing keys fall back to defaults
-from `Game.default()`.
+Current version `4` under key `scrapline.v2.save`. Forward-only migration
+ladder in `Game.migrate()`:
+
+- v1 → v2: settings + tutorialDone
+- v2 → v3: daily retention fields (streakDays, chestDay, dailyChallenges, …)
+- v3 → v4: prestigeNodes, prestigeSpent, activeTheme, themesOwned
+
+Corrupt save → fresh defaults + toast, never silently lost. Reset clears
+both v2 key and legacy `neon_scrapline_factory_frenzy_v1`.
+
+Cloud save sync (Pass 6): when the CrazyGames SDK exposes `data.setItem`,
+saves are debounced-mirrored to it; on init we fetch the cloud copy and
+restore it if it has a newer `lastSave` timestamp.
 
 ## CrazyGames SDK touchpoints
 
-The SDK script is lazy-loaded in [`src/main.ts`](src/main.ts); failures are
-silently ignored. Calls live in [`src/core/ad-bridge.ts`](src/core/ad-bridge.ts):
+Lazy-loaded with a 2.5 s timeout in `src/main.ts`. Calls live in
+`src/core/ad-bridge.ts`:
 
 - `sdk.game.gameplayStart()` / `gameplayStop()` wrap every ad break.
 - `sdk.ad.requestAd('rewarded' | 'midgame')` is the only ad surface.
-- When the SDK is absent the wrapper grants the reward locally and shows a
-  toast — so the game stays usable in dev and on direct GitHub Pages embeds.
+- `sdk.game.happytime()` fires after rewarded claims, level-ups,
+  zone unlocks, contract / achievement claims — tells the SDK when it's
+  safe to schedule its own interstitials.
+- `sdk.user.getUser()` powers the welcome toast.
+- `sdk.data.setItem / getItem` mirror saves to the cloud (debounced 60 s).
+- Midgame interstitials cooldown-gated at 4 minutes between fires, and
+  only fire on zone-unlock after the player has unlocked at least 3 zones.
+
+Without the SDK every path gracefully falls back so the game stays usable
+on direct GitHub Pages embeds.
+
+## Performance
+
+`Perf` module samples frame time for the first 5 seconds on `auto`
+quality and resolves to high / medium / low. Each level adjusts:
+
+- particle cap (300 / 200 / 100)
+- parallax grid (full / thin / off)
+- glow blur multiplier (1.0 / 0.7 / 0.0)
+
+Player can override via the Graphics select in the Menu sheet.
+
+## Debug mode
+
+Append `?debug=1`:
+
+```
+https://<user>.github.io/Scrapline/?debug=1
+```
+
+Shows the debug panel with FPS / item / particle / drone counts plus
+buttons: `+1M $`, `+1B $`, `Skip day`, `Max upgrades`, `+10 PP`,
+`Prestige now`, `Tutorial done`, `Reset save`, `+100 items`,
+`Unlock all zones`, `Frenzy`, `2× boost`, `All themes`.
 
 ## GitHub Pages deployment
 
-The workflow at [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)
-builds on every push to `main` and publishes `dist/` via GitHub Pages.
+The workflow at `.github/workflows/deploy.yml` builds on every push to
+`main` and publishes `dist/` via GitHub Pages.
 
 To enable it the first time:
 
-1. Push this branch to `main` (or merge the PR).
-2. In the repo settings → **Pages**, set **Source** to **GitHub Actions**.
-3. The action will run automatically; the deployed URL appears in the
-   workflow summary (typically `https://<user>.github.io/Scrapline/`).
+1. Merge this branch (or push directly) to `main`.
+2. Settings → **Pages** → set **Source** to **GitHub Actions**.
+3. Action runs automatically; deployed URL appears in the workflow
+   summary (typically `https://<user>.github.io/Scrapline/`).
 
-The build picks the correct asset base path from the repo name via
-`GITHUB_PAGES_BASE`. To build for a different sub-path locally:
+To preview a different sub-path locally:
 
 ```bash
 GITHUB_PAGES_BASE=/MyForkName/ npm run build
 ```
-
-## Notes on the port
-
-- The original prototype was ~60 KB of single-line, comma-chained minified JS
-  inside one `<script>`. The split here is byte-for-byte semantically
-  identical — only formatting, indentation, type annotations and module
-  boundaries changed.
-- TypeScript is intentionally permissive (`strict: false`,
-  `noImplicitAny: false`). Tightening it up is a planned later pass — there is
-  no point fighting the type system before the upcoming content / mobile-HUD
-  overhaul lands.
-- Classes that used to read `Game.up('speed')` / `Game.isFrenzy()` as
-  static-like calls (Player, Core, Drone) now take an explicit `game`
-  reference via a small `bind(game)` method to break the import cycle
-  cleanly.
 
 ## License
 

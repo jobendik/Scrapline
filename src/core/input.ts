@@ -23,11 +23,23 @@ export class Input {
   axis = { x: 0, y: 0 };
   p: Pointer = { active: false, id: null, sx: 0, sy: 0, x: 0, y: 0 };
 
+  /** Optional callback fired when a top-level shortcut key (1-5, esc) hits. */
+  onShortcut: ((which: 'home' | 'goals' | 'shop' | 'boosts' | 'menu' | 'close') => void) | null = null;
+
   constructor() {
     addEventListener('keydown', (e) => {
       const k = e.key.toLowerCase();
       this.keys.add(k);
       if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) e.preventDefault();
+      // Pass 7 — top-level keyboard shortcuts for the bottom nav.
+      const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+      const map: Record<string, 'home' | 'goals' | 'shop' | 'boosts' | 'menu' | 'close'> = {
+        '1': 'home', '2': 'goals', '3': 'shop', '4': 'boosts', '5': 'menu',
+        'escape': 'close',
+      };
+      const hit = map[k];
+      if (hit && this.onShortcut) this.onShortcut(hit);
     });
     addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
     canvas.addEventListener('pointerdown', (e) => this.down(e));

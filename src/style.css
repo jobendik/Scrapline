@@ -218,6 +218,12 @@ button {
 button:hover { filter: brightness(1.12); border-color: rgba(69, 255, 147, .44); }
 button:active { transform: scale(.97); }
 button:disabled { opacity: .42; cursor: not-allowed; filter: grayscale(.65); }
+button:focus-visible,
+.tab:focus-visible,
+.themeBtn:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
 button.good {
   background: linear-gradient(180deg, rgba(43, 145, 87, .94), rgba(7, 58, 37, .94));
   border-color: rgba(69, 255, 147, .4);

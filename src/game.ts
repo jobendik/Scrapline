@@ -25,6 +25,8 @@ import { Particles } from './core/particles';
 import { TextPop } from './core/text-pop';
 import { runDailyCheck } from './core/daily';
 import { renderTutorial, tickTutorial, TUTORIAL_STEPS } from './core/tutorial';
+import { isDebugMode, renderDebugOverlay, sampleFps } from './core/debug';
+import { Perf } from './core/perf';
 import { chestFor } from './data/daily-chest';
 import { makeChallenges } from './data/daily-challenges';
 import { TREE_NODES, nodeCost, nodeUnlocked } from './data/prestige-tree';
@@ -400,6 +402,22 @@ export class Game {
       };
     }
     ui.profilePill.onclick = () => this.openSheet('menu');
+
+    // Pass 7 — keyboard shortcuts. 1=home, 2=goals, 3=shop, 4=boosts, 5=menu, esc=close.
+    this.input.onShortcut = (which) => {
+      if (which === 'close') {
+        this.closeAllSheets();
+        this.setActiveNav('home');
+        ui.dailyModal.classList.add('hidden');
+        return;
+      }
+      if (which === 'home') {
+        this.closeAllSheets();
+        this.setActiveNav('home');
+        return;
+      }
+      this.openSheet(which);
+    };
   }
 
   /** Open one sheet, hide the others, and reflect state in the bottom nav. */
@@ -506,10 +524,7 @@ export class Game {
   applySettings(): void {
     Haptics.enabled = this.state.settings.haptics && Haptics.supported;
     this.audio.setMusicEnabled(this.state.settings.music && this.state.settings.sound);
-    // Graphics quality is currently advisory — entity culling already adapts
-    // to view size. The select is wired so future passes (parallax intensity,
-    // particle caps, glow shadows) can read from this single source.
-    void this.state.settings.gfx;
+    Perf.applySetting(this.state.settings.gfx);
   }
 
   /**
@@ -1142,6 +1157,11 @@ export class Game {
     if (Math.abs(diff) < 0.5) this.displayedCash = target;
     else this.displayedCash += diff * Math.min(1, dt * 4.5);
     this.punchZoom = Math.max(0, this.punchZoom - dt * 1.6);
+    // Pass 7 — sample FPS + drive auto-quality.
+    sampleFps(dt);
+    Perf.tick(dt);
+    const snap = Perf.snapshot();
+    this.particles.cap = snap.particleCap;
     if (this.statusTimer > 0) {
       this.statusTimer -= dt;
       if (this.statusTimer <= 0) this.defaultStatus();
@@ -1422,6 +1442,7 @@ export class Game {
     syncToggle(ui.settingHaptics, this.state.settings.haptics);
     this.updateBadges();
     renderTutorial(this);
+    if (isDebugMode()) renderDebugOverlay(this);
     if (full) {
       this.refreshThemeOwnership();
       this.renderThemePicker();
@@ -1660,11 +1681,13 @@ export class Game {
   }
 
   drawParallax(): void {
+    const snap = Perf.snapshot();
+    if (snap.parallax === 'off') return;
+    const step = snap.parallax === 'thin' ? 144 : 72;
     ctx.save();
-    ctx.globalAlpha = 0.26;
+    ctx.globalAlpha = snap.parallax === 'thin' ? 0.18 : 0.26;
     ctx.strokeStyle = 'rgba(56,248,255,.10)';
     ctx.lineWidth = 1;
-    const step = 72;
     const ox = ((-this.camera.x * 0.07) % step + step) % step;
     const oy = ((-this.camera.y * 0.07) % step + step) % step;
     for (let x = ox; x < view.W; x += step) {

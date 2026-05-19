@@ -15,7 +15,7 @@ import { CONTRACTS } from './data/contracts';
 import { ITEM } from './data/items';
 import { makeMarket, marketSeed } from './data/market';
 import { UPGRADES } from './data/upgrades';
-import { ZONES } from './data/zones';
+import { WORLD_BOUNDS, ZONES } from './data/zones';
 import { AdBridge } from './core/ad-bridge';
 import { AudioSys } from './core/audio';
 import { Camera } from './core/camera';
@@ -78,6 +78,10 @@ export class Game {
   statusTimer = 0;
   xp = 0;
   resetArmed = false;
+  // Pass 2 — countdown until the next magnet-pulse AoE collect (0 = ready).
+  pulseTimer = 0;
+  // Pass 2 — incremented every product sale; recycler fires when threshold hit.
+  recyclerCount = 0;
 
   // ---------------- persistent state ----------------
   state!: SaveState;
@@ -119,6 +123,19 @@ export class Game {
         droneBest: 0,
         frenzies: 0,
         singDriveSold: 0,
+        // Pass 2 — per-product sale counters used by contracts/achievements.
+        ironPartSold: 0,
+        glassLensSold: 0,
+        plasmaCellSold: 0,
+        quantumCoreSold: 0,
+        antiPartSold: 0,
+        darkPartSold: 0,
+        voidPartSold: 0,
+        causalPartSold: 0,
+        entropicPartSold: 0,
+        // Pass 3 — daily login streak counter (ticks when Game.checkDailyLogin
+        // runs and a new UTC day is observed).
+        streakDays: 0,
       },
       settings: this.defaultSettings(),
       tutorialDone: false,
@@ -150,9 +167,14 @@ export class Game {
     this.objects = [...this.nodes, this.core, this.sell, this.term];
     this.applyDrones();
 
-    // Pre-warm spawns so the world isn't empty on first frame.
-    for (let i = 0; i < 70; i++) this.nodes[0].update(1, this);
-    if (this.state.zones.glass) for (let i = 0; i < 50; i++) this.nodes[1].update(1, this);
+    // Pre-warm spawns so the world isn't empty on first frame. Every unlocked
+    // zone gets a slug of pre-spawned items so a returning player doesn't see
+    // bare patches while the spawn rate ramps back up.
+    for (let i = 0; i < this.nodes.length; i++) {
+      if (!this.state.zones[this.nodes[i].zone.id]) continue;
+      const warm = i === 0 ? 70 : 40;
+      for (let k = 0; k < warm; k++) this.nodes[i].update(1, this);
+    }
 
     this.bind();
     this.bindNav();
@@ -408,7 +430,9 @@ export class Game {
         this.state.market = makeMarket();
         this.state.marketDay = marketSeed();
       }
-      const away = clamp((Date.now() - (upgraded.lastSave || Date.now())) / 1000, 0, 8 * 3600);
+      // offlineCap upgrade extends the 8-hour ceiling by 1h per level (max 16h).
+      const capSeconds = (8 + this.up('offlineCap')) * 3600;
+      const away = clamp((Date.now() - (upgraded.lastSave || Date.now())) / 1000, 0, capSeconds);
       if (away > 30) {
         const earn = this.offlineRate() * away;
         this.state.cash += earn;
@@ -508,12 +532,107 @@ export class Game {
     this.state.stats[k] = (this.state.stats[k] || 0) + v;
   }
   valueMult(): number {
+    // prestigeAmp multiplies the per-prestige bonus stack:
+    //   bonus = prestige * 0.08 * (1 + prestigeAmp * 0.15)
+    const prestigeBonus = this.state.prestige * 0.08 * (1 + this.up('prestigeAmp') * 0.15);
     return (
       (1 + this.up('value') * 0.17) *
       (this.state.boostTime > 0 ? 2 : 1) *
       (this.isFrenzy() ? 1.35 : 1) *
-      (1 + this.state.prestige * 0.08)
+      (1 + prestigeBonus)
     );
+  }
+
+  /** Probability that a single sale crits to 2× payout. */
+  critChance(): number {
+    return this.up('crit') * 0.04;
+  }
+
+  /** Interval (seconds) between magnet-pulse AoE collects. 0 means disabled. */
+  pulseInterval(): number {
+    const lvl = this.up('pulse');
+    if (lvl <= 0) return 0;
+    return Math.max(2, 8 - lvl);
+  }
+
+  /** How many product sells trigger a free raw recycle. 0 means disabled. */
+  recyclerEvery(): number {
+    const lvl = this.up('recycler');
+    if (lvl <= 0) return 0;
+    return Math.max(2, 16 - lvl * 2);
+  }
+
+  /**
+   * Drive the magnet-pulse AoE collect. Every pulseInterval seconds, any
+   * non-targeted ground items within 220px of the player get flung toward
+   * them as flying items. Capped at 24 items per pulse so we don't drown the
+   * particle budget.
+   */
+  tickPulse(dt: number): void {
+    const interval = this.pulseInterval();
+    if (interval <= 0) return;
+    this.pulseTimer += dt;
+    if (this.pulseTimer < interval) return;
+    this.pulseTimer = 0;
+    const radius = 220;
+    const r2 = radius * radius;
+    const player = this.player;
+    let pulled = 0;
+    for (let i = 0; i < this.items.length && pulled < 24; i++) {
+      const it = this.items[i];
+      if (it.targeted) continue;
+      const dx = it.x - player.x;
+      const dy = it.y - player.y;
+      if (dx * dx + dy * dy > r2) continue;
+      // Removed via a swap so we can keep iterating without index drift.
+      this.items[i] = this.items[this.items.length - 1];
+      this.items.pop();
+      i--;
+      it.targeted = true;
+      const picked = it;
+      this.flying.push(
+        new FlyingItem(
+          picked.type,
+          picked.x,
+          picked.y,
+          () => ({ x: this.player.x, y: this.player.y - 28 }),
+          () => {
+            if (this.player.carry.length < this.player.capacity) {
+              this.player.carry.push(picked.type);
+              const kind = ITEM[picked.type].kind;
+              this.stats(kind === 'raw' ? 'collected' : 'productsPicked', 1);
+            }
+          },
+          4.2,
+          80,
+        ),
+      );
+      pulled++;
+    }
+    if (pulled > 0) {
+      this.audio.pickup();
+      this.particles.burst(player.x, player.y, '#38f8ff', 16 + pulled, 220, 18);
+    }
+  }
+
+  /**
+   * Hook called by SellHub on every successful sale. Increments the recycler
+   * counter and spawns a free raw at the Core when the threshold is reached.
+   */
+  onProductSold(productType: string): void {
+    const every = this.recyclerEvery();
+    if (every <= 0) return;
+    this.recyclerCount += 1;
+    if (this.recyclerCount < every) return;
+    this.recyclerCount = 0;
+    // Find a raw matching this product's chain by scanning ITEM definitions.
+    let rawType: string | null = null;
+    for (const [id, def] of Object.entries(ITEM)) {
+      if (def.product === productType) { rawType = id; break; }
+    }
+    if (!rawType) return;
+    this.core.deposit(rawType, 1, this);
+    this.text(this.core.x, this.core.y - 90, '+1 RECYCLED', '#45ff93', 14);
   }
   offlineRate(): number {
     return (this.up('drone') * 0.75 + this.up('processor') * 0.35 + 1) * this.valueMult() * (1 + this.up('offline') * 0.2);
@@ -630,6 +749,7 @@ export class Game {
     }
     this.particles.update(dt);
     for (let i = this.texts.length - 1; i >= 0; i--) if (!this.texts[i].update(dt)) this.texts.splice(i, 1);
+    this.tickPulse(dt);
     this.levelCheck();
     this.camera.update(this.player, dt);
     this.audio.tick(this.isFrenzy(), dt);
@@ -1146,7 +1266,7 @@ export class Game {
     const h = 118;
     const x = view.W - w - 18;
     const y = view.H - h - 18;
-    const world = { x: -2200, y: -800, w: 5100, h: 2900 };
+    const world = WORLD_BOUNDS;
     ctx.save();
     rr(ctx, x, y, w, h, 14);
     ctx.fillStyle = 'rgba(4,12,27,.72)';

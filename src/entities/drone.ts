@@ -40,7 +40,9 @@ export class Drone {
   }
 
   get speed(): number {
-    return 190 + this.game.up('drone') * 12 + (this.game.isFrenzy() ? 90 : 0);
+    // droneSpeed upgrade adds 14% per level on top of the base + per-drone-tier scaling.
+    const base = 190 + this.game.up('drone') * 12 + (this.game.isFrenzy() ? 90 : 0);
+    return base * (1 + this.game.up('droneSpeed') * 0.14);
   }
 
   update(dt: number, game: Game): void {

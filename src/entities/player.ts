@@ -7,6 +7,7 @@
 import { ctx } from '../canvas';
 import { TAU } from '../constants';
 import { ITEM } from '../data/items';
+import { ZONES } from '../data/zones';
 import { d2, dist, len, lerp } from '../utils/math';
 import { money } from '../utils/format';
 import { drawItem } from '../render/draw-item';
@@ -19,6 +20,21 @@ interface TrailPoint {
   y: number;
   r: number;
 }
+
+/**
+ * Item-id → tier lookup. Raw items are tiered by the zone they spawn in;
+ * products inherit their raw's tier. Used by Selective Magnet to skip
+ * low-tier items when the player is carrying high-tier ones.
+ */
+const TIER_OF: Record<string, number> = (() => {
+  const out: Record<string, number> = {};
+  for (const z of ZONES) {
+    out[z.raw] = z.tier;
+    const prod = ITEM[z.raw]?.product;
+    if (prod) out[prod] = z.tier;
+  }
+  return out;
+})();
 
 export class Player {
   x = -90;
@@ -88,12 +104,27 @@ export class Player {
 
   pickup(game: Game): void {
     if (this.carry.length >= this.capacity) return;
+
+    // Selective Magnet — skip raws that are at least N tiers below our best
+    // carried tier. Cheap: compute the highest carried raw tier once.
+    const filterLvl = this.game.up('magnetFilter');
+    let minTier = 0;
+    if (filterLvl > 0 && this.carry.length > 0) {
+      let maxCarried = 0;
+      for (const t of this.carry) {
+        const tier = TIER_OF[t] || 0;
+        if (tier > maxCarried) maxCarried = tier;
+      }
+      if (maxCarried > 0) minTier = maxCarried - filterLvl;
+    }
+
     let best = null;
     let bi = -1;
     let bd = this.magnet * this.magnet;
     for (let i = 0; i < game.items.length; i++) {
       const it = game.items[i];
       if (it.targeted) continue;
+      if (minTier > 0 && (TIER_OF[it.type] || 0) < minTier) continue;
       const dd = d2(this.x, this.y, it.x, it.y);
       if (dd < bd) {
         bd = dd;

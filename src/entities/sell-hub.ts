@@ -28,16 +28,23 @@ export class SellHub {
   }
 
   sell(type: string, game: Game, x?: number, y?: number): void {
-    const val = Math.floor(ITEM[type].value * game.valueMult());
+    const base = ITEM[type].value * game.valueMult();
+    // Lucky Routing — chance to crit a sale to 2× payout.
+    const crit = Math.random() < game.critChance();
+    const val = Math.floor(base * (crit ? 2 : 1));
     game.state.cash += val;
     game.state.totalCash += val;
     game.stats('cashEarned', val);
     game.stats('sold', 1);
     game.stats(type + 'Sold', 1);
     game.xp += val * 0.035;
-    game.text(x || this.x, (y || this.y) - 60, '+' + money(val), '#45ff93', 18);
-    game.particles.burst(x || this.x, y || this.y, ITEM[type].color, 14, 160, 20);
+    const popColor = crit ? '#ffd45c' : '#45ff93';
+    const popText = crit ? '+' + money(val) + ' ✦CRIT' : '+' + money(val);
+    game.text(x || this.x, (y || this.y) - 60, popText, popColor, crit ? 20 : 18);
+    game.particles.burst(x || this.x, y || this.y, ITEM[type].color, crit ? 24 : 14, crit ? 240 : 160, 20);
     game.audio.deposit();
+    // Recycler upgrade may grant a free raw deposit.
+    game.onProductSold(type);
   }
 
   draw(_cam: Camera, _game: Game): void {

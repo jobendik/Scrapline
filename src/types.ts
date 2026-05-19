@@ -32,7 +32,12 @@ export type ItemShape =
   | 'rect'
   | 'lens'
   | 'capsule'
-  | 'ring';
+  | 'ring'
+  | 'gear'
+  | 'crystal'
+  | 'prism'
+  | 'vortex'
+  | 'sigil';
 
 /** Definition for a single item type — both raw and product variants share the shape. */
 export interface ItemDef {

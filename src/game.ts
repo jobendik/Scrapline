@@ -217,6 +217,11 @@ export class Game {
     this.bindSettings();
     this.setActiveNav('home');
 
+    // Pass 6 — kick off a background cloud-save pull. If the cloud copy is
+    // newer than what we just loaded from localStorage, merge it in. Runs
+    // async so it never blocks the main boot.
+    this.tryCloudMerge();
+
     // Pass 3 — daily check-in. Runs once per launch and updates streak +
     // chest + challenges if a new UTC day has rolled over since last save.
     const daily = runDailyCheck(this);
@@ -249,7 +254,18 @@ export class Game {
       this.syncSoundLabel();
       ui.intro.classList.add('hidden');
       this.started = true;
-      this.toast('Factory online. Collect raw scrap and feed the Core.');
+      // Pass 6 — personalised greeting if the CrazyGames SDK exposes a user.
+      this.ad
+        .username()
+        .then((name) => {
+          if (name && name !== 'Scrapper') {
+            this.toast(`Welcome back, ${name} — factory online.`);
+          } else {
+            this.toast('Factory online. Collect raw scrap and feed the Core.');
+          }
+        })
+        .catch(() => this.toast('Factory online. Collect raw scrap and feed the Core.'));
+      this.ad.happytime();
       Haptics.zoneUnlock();
       // Pop the daily chest a beat later so the intro fade finishes first.
       if (this.pendingDailyShow) {
@@ -601,11 +617,26 @@ export class Game {
   save(): void {
     this.state.lastSave = Date.now();
     this.state.version = SAVE_VERSION;
+    const blob = JSON.stringify(this.state);
     try {
-      storage.set(SAVE_KEY, JSON.stringify(this.state));
+      storage.set(SAVE_KEY, blob);
     } catch (_e) {
       this.toast('Save failed. Use Export.');
     }
+    // Pass 6 — also write through to the CrazyGames cloud store, debounced
+    // so we don't hammer the SDK with rapid-fire saves.
+    this.cloudSaveDebounced(blob);
+  }
+
+  /** Last cloud-save trigger time + pending timeout for the debounce. */
+  private cloudSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private cloudSaveDebounced(blob: string): void {
+    if (!this.ad) return;
+    if (this.cloudSaveTimer) clearTimeout(this.cloudSaveTimer);
+    this.cloudSaveTimer = setTimeout(() => {
+      this.cloudSaveTimer = null;
+      this.ad.cloudPut(SAVE_KEY, blob);
+    }, 60 * 1000); // 60s debounce
   }
 
   exportSave(): void {
@@ -880,6 +911,38 @@ export class Game {
     this.audio.buy();
   }
 
+  /**
+   * Pass 6 — merge a cloud save with the local one if it represents a
+   * strictly newer lastSave timestamp. Async, fire-and-forget. If the SDK
+   * isn't available cloudGet returns null and this becomes a no-op.
+   */
+  private async tryCloudMerge(): Promise<void> {
+    try {
+      const raw = await this.ad.cloudGet(SAVE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const cloudSaveTime = parsed.lastSave || 0;
+      if (cloudSaveTime <= (this.state.lastSave || 0)) return;
+      // Cloud copy is newer — merge it in and re-init derived state.
+      const upgraded = this.migrate(parsed);
+      const base = this.default();
+      this.state = Object.assign(base, upgraded) as SaveState;
+      this.state.up = Object.assign(base.up, upgraded.up || {});
+      this.state.zones = Object.assign(base.zones, upgraded.zones || {});
+      this.state.contracts = Object.assign(base.contracts, upgraded.contracts || {});
+      this.state.ach = Object.assign(base.ach, upgraded.ach || {});
+      this.state.stats = Object.assign(base.stats, upgraded.stats || {});
+      this.state.settings = Object.assign(base.settings, upgraded.settings || {});
+      this.applyDrones();
+      this.applySettings();
+      this.displayedCash = this.state.cash;
+      this.toast('Synced cloud save — newer progress restored.');
+      this.updateUI(true);
+    } catch (_e) {
+      // Best-effort. Local save still good.
+    }
+  }
+
   /** Player-triggered reroll of today's challenge set. One free per UTC day. */
   rerollDailyChallenges(): void {
     if (this.state.dailyChallengeRerolled) {
@@ -1109,6 +1172,7 @@ export class Game {
       this.punchZoom = 0.1;
       this.audio.levelUp();
       Haptics.levelUp();
+      this.ad?.happytime();
     }
   }
 
@@ -1168,7 +1232,13 @@ export class Game {
     Haptics.zoneUnlock();
     if (n) this.particles.burst(n.x, n.y, z.color, 70, 380, 26);
     this.text(this.player.x, this.player.y - 110, 'ZONE ONLINE', z.color, 28);
-    this.ad.mid('Zone unlocked.');
+    // Per the design spec, midgame interstitial only fires once the player has
+    // unlocked at least 3 zones — gives the early-game momentum time to land.
+    if ((this.state.stats.zonesUnlocked || 0) >= 3) {
+      this.ad.mid('Zone unlocked.');
+    } else {
+      this.ad.happytime();
+    }
     this.updateUI(true);
   }
 
@@ -1234,7 +1304,7 @@ export class Game {
     this.text(this.player.x, this.player.y - 90, 'PRESTIGE', '#ff43df', 32);
     this.save();
     this.updateUI(true);
-    this.ad.mid('Prestige reset complete.');
+    this.ad.mid('Prestige reset complete.', true /* force — always allowed at this beat */);
   }
 
   claimContract(id: string): void {
@@ -1249,6 +1319,7 @@ export class Game {
     this.toast('Contract complete: ' + money(c.reward));
     this.audio.buy();
     Haptics.buy();
+    this.ad?.happytime();
     this.updateUI(true);
   }
 
@@ -1263,6 +1334,7 @@ export class Game {
     this.toast('Achievement claimed: ' + a.title);
     this.audio.buy();
     Haptics.buy();
+    this.ad?.happytime();
     this.updateUI(true);
   }
 
@@ -1278,6 +1350,7 @@ export class Game {
     this.toast('Market shipment paid ' + money(m.reward));
     this.audio.buy();
     Haptics.buy();
+    this.ad?.happytime();
     this.updateUI(true);
   }
 

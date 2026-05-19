@@ -65,8 +65,10 @@ export const ui = {
 
   // Tabs inside the Goals sheet.
   tabContracts: el('tabContracts'),
+  tabDaily: el('tabDaily'),
   tabMarket: el('tabMarket'),
   tabAchievements: el('tabAchievements'),
+  tabDailyDot: el('tabDailyDot'),
 
   // Ad box.
   adBox: el('adBox'),
@@ -104,6 +106,26 @@ export const ui = {
   loadScreen: el('loadScreen'),
   loadFill: el('loadFill'),
   loadHint: el('loadHint'),
+
+  // Daily chest modal.
+  dailyModal: el('dailyModal'),
+  dailyTitle: el('dailyTitle'),
+  dailyEyebrow: el('dailyEyebrow'),
+  dailyStreak: el('dailyStreak'),
+  dailyChestSlot: el('dailyChestSlot'),
+  dailyCash: el('dailyCash'),
+  dailyPp: el('dailyPp'),
+  dailyClaim: el<HTMLButtonElement>('dailyClaimBtn'),
+  dailyDouble: el<HTMLButtonElement>('dailyDoubleBtn'),
+  dailyClose: el<HTMLButtonElement>('dailyCloseBtn'),
+  dailyStreakRow: el('dailyStreakRow'),
+
+  // Tutorial banner.
+  tutorialBanner: el('tutorialBanner'),
+  tutorialTitle: el('tutorialTitle'),
+  tutorialBody: el('tutorialBody'),
+  tutorialProgress: el('tutorialProgress'),
+  tutorialSkip: el<HTMLButtonElement>('tutorialSkipBtn'),
 };
 
 export type UI = typeof ui;

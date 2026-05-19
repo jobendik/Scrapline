@@ -475,6 +475,146 @@ button.danger {
 .boostBtn .boostSub { font-size: 11px; font-weight: 600; opacity: .85; }
 .boostBtn:disabled .boostSub { opacity: .6; }
 
+/* --------------------------------------------------- daily chest modal */
+
+.chestCard {
+  position: relative;
+  overflow: hidden;
+  padding: 22px 24px;
+}
+.chestEyebrow {
+  font-size: 11px; letter-spacing: .25em; text-transform: uppercase;
+  color: var(--muted);
+}
+.chestRow {
+  display: flex; align-items: center; gap: 16px;
+  margin: 14px 0 18px;
+  padding: 14px; border-radius: 18px;
+  border: 1px solid rgba(255, 212, 92, .35);
+  background: linear-gradient(135deg, rgba(60, 40, 8, .55), rgba(5, 9, 18, .65));
+}
+.chestSlot {
+  position: relative; width: 92px; height: 92px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 22px;
+  background: rgba(0, 0, 0, .25);
+  border: 1px solid rgba(255, 212, 92, .35);
+  flex-shrink: 0;
+}
+.chestSlot .chestIcon {
+  font-size: 56px; color: var(--gold); text-shadow: 0 0 22px var(--gold);
+  font-weight: 950;
+}
+.chestGlow {
+  position: absolute; inset: -4px; border-radius: 26px;
+  pointer-events: none;
+  box-shadow: 0 0 32px var(--gold);
+  animation: chestPulse 1.6s ease-in-out infinite;
+}
+@keyframes chestPulse {
+  from { filter: brightness(.85); }
+  to   { filter: brightness(1.4); }
+}
+.chestSlot[data-tier="rare"]      { border-color: rgba(56, 248, 255, .55); }
+.chestSlot[data-tier="rare"] .chestIcon { color: var(--cyan); text-shadow: 0 0 22px var(--cyan); }
+.chestSlot[data-tier="rare"] .chestGlow { box-shadow: 0 0 32px var(--cyan); }
+.chestSlot[data-tier="epic"]      { border-color: rgba(255, 67, 223, .65); }
+.chestSlot[data-tier="epic"] .chestIcon { color: var(--pink); text-shadow: 0 0 26px var(--pink); }
+.chestSlot[data-tier="epic"] .chestGlow { box-shadow: 0 0 38px var(--pink); }
+.chestSlot[data-tier="legendary"] {
+  border-color: rgba(255, 67, 223, .8);
+  background: linear-gradient(135deg, rgba(255, 67, 223, .25), rgba(255, 212, 92, .25));
+}
+.chestSlot[data-tier="legendary"] .chestIcon {
+  background: linear-gradient(135deg, var(--pink), var(--gold));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 14px var(--pink));
+}
+.chestSlot[data-tier="legendary"] .chestGlow {
+  box-shadow: 0 0 50px var(--pink), 0 0 80px var(--gold);
+}
+
+.chestPayout { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.chestLine {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 13px;
+}
+.chestVal {
+  font-weight: 950; font-size: 17px;
+  text-shadow: 0 0 8px rgba(69, 255, 147, .5);
+}
+
+.chestActions {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: 8px;
+}
+.chestActions button { min-height: 44px; }
+
+.chestStreak {
+  display: flex; gap: 4px; justify-content: center; flex-wrap: wrap;
+  margin-top: 14px;
+}
+.chestStreak .pip {
+  width: 18px; height: 18px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, .04);
+  border: 1px solid rgba(255, 255, 255, .07);
+  font-size: 9px; font-weight: 900; color: var(--muted);
+}
+.chestStreak .pip.done { background: linear-gradient(180deg, var(--cyan), var(--green)); color: #04101a; border-color: transparent; }
+.chestStreak .pip.today { background: linear-gradient(180deg, rgba(255, 212, 92, .9), rgba(204, 152, 35, .9)); color: #2a1a05; border-color: rgba(255, 212, 92, 1); animation: chestPulse 1.4s ease-in-out infinite alternate; }
+.chestStreak .pip.milestone { border-color: rgba(255, 67, 223, .65); }
+
+/* --------------------------------------------------- tutorial banner */
+
+.tutorialBanner {
+  position: absolute;
+  left: 50%; top: calc(112px + var(--safe-top));
+  transform: translateX(-50%);
+  width: min(420px, calc(100vw - 24px));
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(56, 248, 255, .5);
+  background: linear-gradient(180deg, rgba(8, 32, 60, .96), rgba(3, 9, 21, .96));
+  box-shadow: 0 0 26px rgba(56, 248, 255, .35);
+  display: flex; gap: 10px; align-items: flex-start;
+  pointer-events: auto; z-index: 15;
+  animation: tutPulse 1.8s ease-in-out infinite alternate;
+}
+@keyframes tutPulse {
+  from { box-shadow: 0 0 16px rgba(56, 248, 255, .35); }
+  to   { box-shadow: 0 0 32px rgba(56, 248, 255, .65); }
+}
+.tutorialPointer {
+  color: var(--cyan); font-size: 22px; line-height: 1; padding-top: 2px;
+  flex-shrink: 0;
+}
+.tutorialText { flex: 1; min-width: 0; }
+.tutorialHead {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 13px; font-weight: 950; color: var(--cyan);
+  letter-spacing: .08em; text-transform: uppercase;
+}
+.tutorialProgress { color: var(--muted); font-size: 10px; }
+.tutorialBody { font-size: 12px; color: var(--text); line-height: 1.4; margin-top: 4px; }
+.tutorialSkip {
+  font-size: 10px; padding: 4px 10px; min-height: 28px;
+  background: rgba(255, 255, 255, .05);
+  border: 1px solid rgba(255, 255, 255, .1);
+}
+
+@media (max-width: 1040px) {
+  .tutorialBanner { top: calc(132px + var(--safe-top)); }
+}
+
+/* Tab badge dot for the new Daily tab. */
+.tab { position: relative; }
+.tab .tabDot {
+  position: absolute; top: 4px; right: 6px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--pink); box-shadow: 0 0 6px var(--pink);
+}
+
 /* ----------------------------------------------------------- load screen */
 
 .loadScreen {

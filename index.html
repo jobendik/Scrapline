@@ -40,11 +40,12 @@
         <h2>Progress <span id="progressHint">contracts</span></h2>
         <div class="tabs">
           <div class="tab active" id="tabContracts">Contracts</div>
+          <div class="tab" id="tabDaily">Daily<span class="tabDot" id="tabDailyDot" hidden></span></div>
           <div class="tab" id="tabMarket">Market</div>
           <div class="tab" id="tabAchievements">Badges</div>
         </div>
         <div class="scroll" id="progressList"></div>
-        <div class="smallNote">Designed for retention: contracts, market orders, achievements, offline earnings and prestige.</div>
+        <div class="smallNote">Designed for retention: contracts, daily chest + challenges, market orders, achievements, offline earnings and prestige.</div>
         <button class="sheetClose" data-sheet-close="goals" aria-label="Close panel">Close</button>
       </section>
 
@@ -182,6 +183,41 @@
         </div>
         <button class="good" id="startBtn">Start Factory</button>
       </div>
+    </div>
+
+    <!-- Welcome-back / daily chest modal. Pops up once on a fresh UTC day if
+         there's an unclaimed chest. Auto-hides after CLAIM or CLOSE. -->
+    <div class="modal hidden" id="dailyModal">
+      <div class="card chestCard">
+        <div class="chestEyebrow" id="dailyEyebrow">Daily Cache</div>
+        <h1 id="dailyTitle">Day 1</h1>
+        <p id="dailyStreak">Streak: 1 day.</p>
+        <div class="chestRow">
+          <div class="chestSlot" id="dailyChestSlot">
+            <div class="chestGlow" id="dailyChestGlow"></div>
+            <div class="chestIcon">◆</div>
+          </div>
+          <div class="chestPayout">
+            <div class="chestLine"><span class="muted">Cash</span><span class="chestVal" id="dailyCash">$0</span></div>
+            <div class="chestLine"><span class="muted">Prestige</span><span class="chestVal" id="dailyPp">—</span></div>
+          </div>
+        </div>
+        <div class="chestActions">
+          <button class="good" id="dailyClaimBtn">Claim</button>
+          <button class="premium" id="dailyDoubleBtn">Watch ad — 2× claim</button>
+          <button id="dailyCloseBtn">Later</button>
+        </div>
+        <div class="chestStreak" id="dailyStreakRow"></div>
+      </div>
+    </div>
+
+    <div class="tutorialBanner hidden" id="tutorialBanner">
+      <div class="tutorialPointer">▼</div>
+      <div class="tutorialText">
+        <div class="tutorialHead"><span id="tutorialTitle">Move</span><span class="tutorialProgress" id="tutorialProgress">1 / 6</span></div>
+        <div class="tutorialBody" id="tutorialBody">Drag anywhere to fly your craft.</div>
+      </div>
+      <button class="tutorialSkip" id="tutorialSkipBtn" aria-label="Skip tutorial">Skip</button>
     </div>
 
     <div class="adBox hidden" id="adBox">

@@ -23,6 +23,10 @@ import { Haptics } from './core/haptics';
 import { Input } from './core/input';
 import { Particles } from './core/particles';
 import { TextPop } from './core/text-pop';
+import { runDailyCheck } from './core/daily';
+import { renderTutorial, tickTutorial, TUTORIAL_STEPS } from './core/tutorial';
+import { chestFor } from './data/daily-chest';
+import { makeChallenges } from './data/daily-challenges';
 import { Core } from './entities/core';
 import { Drone } from './entities/drone';
 import { FlyingItem } from './entities/flying-item';
@@ -41,7 +45,7 @@ const storage = safeStorage();
 if (!storage.persistent) ui.storageWarn.classList.remove('hidden');
 ui.storageOk.onclick = () => ui.storageWarn.classList.add('hidden');
 
-type Tab = 'contracts' | 'market' | 'achievements';
+type Tab = 'contracts' | 'daily' | 'market' | 'achievements';
 
 export class Game {
   // ---------------- subsystems ----------------
@@ -82,6 +86,11 @@ export class Game {
   pulseTimer = 0;
   // Pass 2 — incremented every product sale; recycler fires when threshold hit.
   recyclerCount = 0;
+  // Pass 3 — timestamp when the tutorial's final-step banner first appeared.
+  tutorialBannerSeenAt = 0;
+  // Pass 3 — set when init detects a fresh-day chest waiting; the Start
+  // Factory button shows it after the intro dismisses.
+  pendingDailyShow = false;
 
   // ---------------- persistent state ----------------
   state!: SaveState;
@@ -139,6 +148,16 @@ export class Game {
       },
       settings: this.defaultSettings(),
       tutorialDone: false,
+      tutorialStep: 0,
+      // Pass 3 — daily retention defaults
+      lastLoginUTC: '',
+      streakDays: 0,
+      chestDay: 0,
+      chestClaimedToday: false,
+      pendingChestDay: 0,
+      dailyChallengeDay: 0,
+      dailyChallenges: [],
+      dailyChallengeRerolled: false,
     };
   }
 
@@ -180,6 +199,20 @@ export class Game {
     this.bindNav();
     this.bindSettings();
     this.setActiveNav('home');
+
+    // Pass 3 — daily check-in. Runs once per launch and updates streak +
+    // chest + challenges if a new UTC day has rolled over since last save.
+    const daily = runDailyCheck(this);
+    if (daily.newDay && !this.state.chestClaimedToday) {
+      // Defer the modal until after the intro modal is dismissed so we don't
+      // stack two full-screen overlays on first launch.
+      this.pendingDailyShow = true;
+    }
+    if (daily.streakBroken && this.state.prestigeRuns > 0) {
+      // Returning veteran missed a day — softer surface than the modal.
+      setTimeout(() => this.toast('Welcome back — streak reset to day 1.'), 1200);
+    }
+
     this.updateUI(true);
     requestAnimationFrame(() => this.loop());
   }
@@ -201,6 +234,11 @@ export class Game {
       this.started = true;
       this.toast('Factory online. Collect raw scrap and feed the Core.');
       Haptics.zoneUnlock();
+      // Pop the daily chest a beat later so the intro fade finishes first.
+      if (this.pendingDailyShow) {
+        this.pendingDailyShow = false;
+        setTimeout(() => this.showDailyModal(), 600);
+      }
     };
 
     const onSoundClick = async () => {
@@ -271,8 +309,24 @@ export class Game {
 
     ui.adClose.onclick = () => this.ad.hide();
     ui.tabContracts.onclick = () => this.setTab('contracts');
+    ui.tabDaily.onclick = () => this.setTab('daily');
     ui.tabMarket.onclick = () => this.setTab('market');
     ui.tabAchievements.onclick = () => this.setTab('achievements');
+
+    // Daily chest modal.
+    ui.dailyClaim.onclick = () => this.claimDaily(false);
+    ui.dailyDouble.onclick = () =>
+      this.ad.rewarded('Doubles your daily chest cash payout.', () => this.claimDaily(true));
+    ui.dailyClose.onclick = () => ui.dailyModal.classList.add('hidden');
+
+    // Tutorial skip.
+    ui.tutorialSkip.onclick = () => {
+      this.state.tutorialDone = true;
+      this.state.tutorialStep = TUTORIAL_STEPS.length;
+      ui.tutorialBanner.classList.add('hidden');
+      this.save();
+    };
+
     addEventListener('beforeunload', () => this.save());
   }
 
@@ -469,7 +523,22 @@ export class Game {
       data.settings = Object.assign(this.defaultSettings(), data.settings || {});
       data.tutorialDone = !!data.tutorialDone;
     }
-    // future: if (v < 3) { ... }
+    // v2 -> v3: add daily retention fields. Existing players are treated as
+    // "tutorial done" since they've already played without the tutorial.
+    if (v < 3) {
+      data.version = 3;
+      data.tutorialStep = typeof data.tutorialStep === 'number' ? data.tutorialStep : 0;
+      // Anyone with existing progress probably knows how to play — skip tutorial.
+      if (data.totalCash > 0 || data.stats?.collected > 0) data.tutorialDone = true;
+      data.lastLoginUTC = data.lastLoginUTC || '';
+      data.streakDays = data.streakDays || 0;
+      data.chestDay = data.chestDay || 0;
+      data.chestClaimedToday = !!data.chestClaimedToday;
+      data.pendingChestDay = data.pendingChestDay || 0;
+      data.dailyChallengeDay = data.dailyChallengeDay || 0;
+      data.dailyChallenges = Array.isArray(data.dailyChallenges) ? data.dailyChallenges : [];
+      data.dailyChallengeRerolled = !!data.dailyChallengeRerolled;
+    }
     return data as Partial<SaveState>;
   }
 
@@ -615,6 +684,107 @@ export class Game {
     }
   }
 
+  // ============================ Pass 3 — daily ============================
+
+  /** Base cash payout for a daily chest, scaled by level + prestige + valueMult. */
+  chestBaseCash(): number {
+    const lvlScale = 100 * Math.pow(this.state.level, 1.4);
+    return Math.floor(lvlScale * (1 + this.state.prestige * 0.1) * this.valueMult());
+  }
+
+  /** Open the daily chest modal with today's pending chest. No-op if already claimed. */
+  showDailyModal(): void {
+    if (this.state.chestClaimedToday) return;
+    const day = this.state.chestDay || 1;
+    const reward = chestFor(day);
+    const baseCash = this.chestBaseCash() * reward.cashMult;
+    ui.dailyTitle.textContent = 'Day ' + day;
+    ui.dailyEyebrow.textContent = reward.label;
+    ui.dailyStreak.textContent = `Streak: ${this.state.streakDays || 1} day${(this.state.streakDays || 1) === 1 ? '' : 's'}.`;
+    ui.dailyChestSlot.dataset.tier = reward.tier || 'common';
+    ui.dailyCash.textContent = money(Math.floor(baseCash));
+    ui.dailyPp.textContent = reward.prestigePoints ? '+' + reward.prestigePoints + ' PP' : '—';
+    ui.dailyDouble.disabled = false;
+    ui.dailyDouble.textContent = 'Watch ad — 2× claim';
+
+    // Streak strip (30 pips). Past days = done; today = today; future = empty.
+    ui.dailyStreakRow.innerHTML = '';
+    for (let i = 1; i <= 30; i++) {
+      const pip = document.createElement('div');
+      pip.className = 'pip';
+      if (i < day) pip.classList.add('done');
+      else if (i === day) pip.classList.add('today');
+      if (i % 7 === 0) pip.classList.add('milestone');
+      pip.textContent = String(i);
+      ui.dailyStreakRow.appendChild(pip);
+    }
+
+    ui.dailyModal.classList.remove('hidden');
+    if (this.started) this.audio.surge();
+  }
+
+  /** Award today's chest. `doubled` is set when the rewarded-ad path fires. */
+  claimDaily(doubled: boolean): void {
+    if (this.state.chestClaimedToday) {
+      ui.dailyModal.classList.add('hidden');
+      return;
+    }
+    const day = this.state.chestDay || 1;
+    const reward = chestFor(day);
+    const baseCash = this.chestBaseCash() * reward.cashMult * (doubled ? 2 : 1);
+    const cash = Math.floor(baseCash);
+    this.state.cash += cash;
+    this.state.totalCash += cash;
+    this.stats('cashEarned', cash);
+    this.xp += cash * 0.05;
+    if (reward.prestigePoints) {
+      this.state.prestige += reward.prestigePoints;
+    }
+    this.state.chestClaimedToday = true;
+    this.state.pendingChestDay = 0;
+    this.audio.buy();
+    Haptics.levelUp();
+    this.camera.shake = 14;
+    this.particles.burst(this.player.x, this.player.y, '#ffd45c', 60, 360, 24);
+    this.text(this.player.x, this.player.y - 80, '+' + money(cash), '#ffd45c', 22);
+    ui.dailyModal.classList.add('hidden');
+    this.toast(doubled ? '2× daily chest claimed.' : 'Daily chest claimed.');
+    this.save();
+    this.updateUI(true);
+  }
+
+  /** Player-triggered reroll of today's challenge set. One free per UTC day. */
+  rerollDailyChallenges(): void {
+    if (this.state.dailyChallengeRerolled) {
+      this.toast('Reroll already used today.');
+      return;
+    }
+    this.state.dailyChallengeRerolled = true;
+    this.state.dailyChallenges = makeChallenges(this.state.level, 1, this.state.stats);
+    this.audio.buy();
+    Haptics.buy();
+    this.toast('Daily challenges rerolled.');
+    this.save();
+    this.updateUI(true);
+  }
+
+  /** Claim a completed daily challenge by id. */
+  claimChallenge(id: string): void {
+    const c = this.state.dailyChallenges.find((x) => x.id === id);
+    if (!c || c.claimed) return;
+    const p = this.prog(c.type) - c.start;
+    if (p < c.target) return;
+    c.claimed = true;
+    this.state.cash += c.reward;
+    this.state.totalCash += c.reward;
+    this.stats('cashEarned', c.reward);
+    this.xp += c.reward * 0.1;
+    this.audio.buy();
+    Haptics.buy();
+    this.toast('Daily challenge: +' + money(c.reward));
+    this.updateUI(true);
+  }
+
   /**
    * Hook called by SellHub on every successful sale. Increments the recycler
    * counter and spawns a free raw at the Core when the threshold is reached.
@@ -750,6 +920,7 @@ export class Game {
     this.particles.update(dt);
     for (let i = this.texts.length - 1; i >= 0; i--) if (!this.texts[i].update(dt)) this.texts.splice(i, 1);
     this.tickPulse(dt);
+    tickTutorial(this);
     this.levelCheck();
     this.camera.update(this.player, dt);
     this.audio.tick(this.isFrenzy(), dt);
@@ -931,6 +1102,7 @@ export class Game {
     this.tab = t;
     const map: Array<[Tab, HTMLElement]> = [
       ['contracts', ui.tabContracts],
+      ['daily', ui.tabDaily],
       ['market', ui.tabMarket],
       ['achievements', ui.tabAchievements],
     ];
@@ -988,6 +1160,7 @@ export class Game {
     syncToggle(ui.settingMusic, this.state.settings.music);
     syncToggle(ui.settingHaptics, this.state.settings.haptics);
     this.updateBadges();
+    renderTutorial(this);
     if (full) {
       this.buildProgress();
       this.buildShop();
@@ -1001,8 +1174,9 @@ export class Game {
    * we recompute it every UI tick.
    */
   updateBadges(): void {
-    // Goals: any unclaimed contract / market / achievement that's ready.
+    // Goals: any unclaimed contract / market / achievement / daily that's ready.
     let goalsReady = false;
+    let dailyReady = !this.state.chestClaimedToday;
     for (const c of CONTRACTS) {
       if (!this.state.contracts[c.id] && this.prog(c.type) >= c.target) { goalsReady = true; break; }
     }
@@ -1016,7 +1190,14 @@ export class Game {
         if (!this.state.ach[a.id] && this.prog(a.type) >= a.target) { goalsReady = true; break; }
       }
     }
+    if (!dailyReady) {
+      for (const dc of this.state.dailyChallenges || []) {
+        if (!dc.claimed && this.prog(dc.type) - dc.start >= dc.target) { dailyReady = true; break; }
+      }
+    }
+    if (dailyReady) goalsReady = true;
     ui.navDotGoals.hidden = !goalsReady;
+    ui.tabDailyDot.hidden = !dailyReady;
 
     // Shop: any affordable upgrade or zone unlock, or prestige ready.
     let shopReady = false;
@@ -1046,6 +1227,38 @@ export class Game {
       if (!ui.progress.children.length)
         ui.progress.innerHTML =
           '<div class="smallNote">All contracts complete. Prestige or keep expanding.</div>';
+    } else if (this.tab === 'daily') {
+      // Daily chest row.
+      const day = this.state.chestDay || 1;
+      const chestReward = chestFor(day);
+      const cash = Math.floor(this.chestBaseCash() * chestReward.cashMult);
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.innerHTML = `<div class="main"><div class="name">Day ${day} chest <span style="color:#82a6b7">streak ${this.state.streakDays || 1}</span></div><div class="desc">${chestReward.label} · ${money(cash)}${chestReward.prestigePoints ? ' + ' + chestReward.prestigePoints + ' PP' : ''}</div></div>`;
+      const b = document.createElement('button');
+      const claimed = this.state.chestClaimedToday;
+      b.textContent = claimed ? 'CLAIMED' : 'OPEN';
+      b.className = claimed ? '' : 'good';
+      b.disabled = claimed;
+      b.onclick = () => this.showDailyModal();
+      row.appendChild(b);
+      ui.progress.appendChild(row);
+
+      // Daily challenges.
+      for (const c of this.state.dailyChallenges || []) {
+        const p = this.prog(c.type) - c.start;
+        this.addProgressRow(c.title, 'Today · ' + money(c.reward), p, c.target, () => this.claimChallenge(c.id), c.claimed);
+      }
+      // Reroll button.
+      const rr = document.createElement('div');
+      rr.className = 'row';
+      rr.innerHTML = `<div class="main"><div class="name">Reroll challenges</div><div class="desc">${this.state.dailyChallengeRerolled ? 'Already used today.' : 'Swap the current 3 for a new set. One free per day.'}</div></div>`;
+      const rb = document.createElement('button');
+      rb.textContent = this.state.dailyChallengeRerolled ? 'USED' : 'REROLL';
+      rb.disabled = this.state.dailyChallengeRerolled;
+      rb.onclick = () => this.rerollDailyChallenges();
+      rr.appendChild(rb);
+      ui.progress.appendChild(rr);
     } else if (this.tab === 'market') {
       for (const m of this.state.market) {
         const p = this.prog(m.type + 'Sold') - m.start;

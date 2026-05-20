@@ -121,6 +121,12 @@ export const ui = {
   dailyClose: el<HTMLButtonElement>('dailyCloseBtn'),
   dailyStreakRow: el('dailyStreakRow'),
 
+  // Prestige confirmation modal.
+  prestigeModal: el('prestigeModal'),
+  prestigeModalDesc: el('prestigeModalDesc'),
+  prestigeConfirm: el<HTMLButtonElement>('prestigeConfirmBtn'),
+  prestigeCancel: el<HTMLButtonElement>('prestigeCancelBtn'),
+
   // Tutorial banner.
   tutorialBanner: el('tutorialBanner'),
   tutorialTitle: el('tutorialTitle'),

@@ -410,6 +410,10 @@ button.danger {
 }
 .storage button { font-size: 10px; padding: 4px 8px; margin-top: 6px; min-height: 28px; }
 
+.soundNudge {
+  font-size: 12px; color: var(--muted); margin: 0 0 16px;
+}
+
 .smallNote {
   font-size: 10px; color: var(--muted); line-height: 1.35;
   text-align: center; margin-top: 8px;

@@ -354,6 +354,10 @@ export class Game {
       this.ad.rewarded('Doubles your daily chest cash payout.', () => this.claimDaily(true));
     ui.dailyClose.onclick = () => ui.dailyModal.classList.add('hidden');
 
+    // Prestige confirmation modal.
+    ui.prestigeConfirm.onclick = () => this.confirmPrestige();
+    ui.prestigeCancel.onclick = () => ui.prestigeModal.classList.add('hidden');
+
     // Tutorial skip.
     ui.tutorialSkip.onclick = () => {
       this.state.tutorialDone = true;
@@ -409,6 +413,7 @@ export class Game {
         this.closeAllSheets();
         this.setActiveNav('home');
         ui.dailyModal.classList.add('hidden');
+        ui.prestigeModal.classList.add('hidden');
         return;
       }
       if (which === 'home') {
@@ -1272,7 +1277,15 @@ export class Game {
       this.toast('Prestige requires more total cash and levels.');
       return;
     }
-    if (!confirm('Prestige now? Reset factory for +' + gain + ' permanent prestige points.')) return;
+    ui.prestigeModalDesc.textContent =
+      `Reset factory for +${gain} permanent prestige point${gain === 1 ? '' : 's'}.`;
+    ui.prestigeModal.classList.remove('hidden');
+  }
+
+  confirmPrestige(): void {
+    ui.prestigeModal.classList.add('hidden');
+    const gain = this.prestigeGain();
+    if (gain <= 0) return;
     const keep = this.state.prestige + gain;
     const runs = this.state.prestigeRuns + 1;
     // Preserve tree-spent + ownership when resetting so the prestige tree

@@ -93,14 +93,9 @@ export class Drone {
       this.move(game.sell.x, game.sell.y, dt);
       if (dist(this.x, this.y, game.sell.x, game.sell.y) < 95) {
         if (this.carry) {
-          // Elite-class drones occasionally double the cash payout on a sale.
           const goldRoll = Math.random() < this.def.goldChance;
-          if (goldRoll) game.state.boostTime = Math.max(0.0001, game.state.boostTime); // ensure boost stays
-          game.sell.sell(this.carry, game, this.x, this.y - 20);
+          game.sell.sell(this.carry, game, this.x, this.y - 20, goldRoll ? 2 : 1);
           if (goldRoll) {
-            // Re-pay: add an extra payout on top to model the gold-pickup bonus.
-            const extra = Math.floor((Math.max(1, game.state.cash * 0)) + 0); // placeholder; bonus baked into sell
-            void extra;
             game.particles.burst(this.x, this.y - 20, '#ffd45c', 18, 220, 22);
           }
         }

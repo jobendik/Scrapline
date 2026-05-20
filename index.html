@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <meta name="description" content="Scrapline — neon cyberpunk idle-tycoon. Collect scrap, run the Core, ship parts, automate with drones." />
   <meta name="theme-color" content="#020611" />
   <title>Scrapline</title>
@@ -45,7 +46,7 @@
           <div class="tab" id="tabAchievements">Badges</div>
         </div>
         <div class="scroll" id="progressList"></div>
-        <div class="smallNote">Designed for retention: contracts, daily chest + challenges, market orders, achievements, offline earnings and prestige.</div>
+        <div class="smallNote">Check here daily for contracts, market orders, achievements and daily rewards.</div>
         <button class="sheetClose" data-sheet-close="goals" aria-label="Close panel">Close</button>
       </section>
 
@@ -89,7 +90,7 @@
             <div class="settingRow">
               <div>
                 <div class="settingName">Music</div>
-                <div class="settingDesc">Background loop. (Composed in a later pass.)</div>
+                <div class="settingDesc">Background loop with Frenzy variant.</div>
               </div>
               <button class="toggle" id="settingMusic" data-on="false" aria-pressed="false">Off</button>
             </div>
@@ -186,6 +187,7 @@
           <div class="tip"><b>Process</b><br>Deposit raw scrap at the Core</div>
           <div class="tip"><b>Sell</b><br>Deliver components to the Sell Hub</div>
         </div>
+        <p class="soundNudge">🔊 Enable sound in ≡ Menu for the full neon experience.</p>
         <button class="good" id="startBtn">Start Factory</button>
       </div>
     </div>
@@ -216,8 +218,24 @@
       </div>
     </div>
 
+    <!-- Prestige confirmation modal. Shown instead of a browser confirm() so
+         it works correctly in sandboxed iframe environments like CrazyGames. -->
+    <div class="modal hidden" id="prestigeModal">
+      <div class="card">
+        <h1>Prestige Reboot</h1>
+        <p id="prestigeModalDesc">Reset your factory for permanent Prestige Points.</p>
+        <div class="tips" style="grid-template-columns:1fr 1fr;margin:14px 0 8px">
+          <div class="tip"><b>You keep</b><br>PP · Tree nodes · Themes · Streak</div>
+          <div class="tip"><b>You reset</b><br>Cash · Upgrades · Zones · Level</div>
+        </div>
+        <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:10px">
+          <button class="warn" id="prestigeConfirmBtn">Confirm Reboot</button>
+          <button id="prestigeCancelBtn">Cancel</button>
+        </div>
+      </div>
+    </div>
+
     <div class="tutorialBanner hidden" id="tutorialBanner">
-      <div class="tutorialPointer">▼</div>
       <div class="tutorialText">
         <div class="tutorialHead"><span id="tutorialTitle">Move</span><span class="tutorialProgress" id="tutorialProgress">1 / 6</span></div>
         <div class="tutorialBody" id="tutorialBody">Drag anywhere to fly your craft.</div>

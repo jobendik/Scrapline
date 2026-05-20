@@ -27,8 +27,8 @@ export class SellHub {
     this.phase += dt;
   }
 
-  sell(type: string, game: Game, x?: number, y?: number): void {
-    const base = ITEM[type].value * game.valueMult();
+  sell(type: string, game: Game, x?: number, y?: number, goldMult = 1): void {
+    const base = ITEM[type].value * game.valueMult() * goldMult;
     // Lucky Routing — chance to crit a sale to 2× payout.
     const crit = Math.random() < game.critChance();
     const val = Math.floor(base * (crit ? 2 : 1));
